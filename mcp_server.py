@@ -111,7 +111,14 @@ def get_rocketbot_variables() -> dict[str, object]:
     return load_variables(variables_file())
 
 
-@mcp.tool(description="Crea un archivo .db SQLite compatible con Rocketbot en formato normal.")
+@mcp.tool(
+    description=(
+        "Crea un archivo .db SQLite compatible con Rocketbot en formato normal. "
+        "Acepta una definición JSON con bot principal, HUs/subrobots, variables y comandos. "
+        "Antes de usar módulos externos, consulta scan_rocketbot_modules_catalog y usa "
+        "los nombres y parámetros reales del package.json."
+    )
+)
 def create_rocketbot_db_file(
     output_path: str = Field(description="Ruta destino del archivo .db"),
     definition_json: Any = Field(
@@ -130,7 +137,12 @@ def create_rocketbot_db_file(
     )
 
 
-@mcp.tool(description="Crea un archivo .db SQLite Rocketbot recibiendo directamente la lista de bots. Recomendado para Inspector y clientes MCP.")
+@mcp.tool(
+    description=(
+        "Crea un archivo .db SQLite Rocketbot recibiendo directamente la lista de bots. "
+        "Recomendado para Inspector y clientes MCP con una estructura Rocketbot ya compilada."
+    )
+)
 def create_rocketbot_db_from_object(
     output_path: str = Field(description="Ruta destino del archivo .db"),
     bots: list[dict[str, Any]] = Field(description="Lista de bots a persistir"),
@@ -143,7 +155,13 @@ def create_rocketbot_db_from_object(
     )
 
 
-@mcp.tool(description="Exporta un .db de Rocketbot a JSON editable. Si está en encrypt, exporta metadatos y preview del payload.")
+@mcp.tool(
+    description=(
+        "Lee una DB de Rocketbot desde cualquier ruta accesible y la exporta a JSON editable. "
+        "Úsala para analizar bots, HUs, variables, módulos y comandos. Si está en encrypt, "
+        "exporta metadatos y preview del payload."
+    )
+)
 def export_rocketbot_db_json(
     db_path: str = Field(description="Ruta del archivo .db de Rocketbot"),
     output_json_path: str | None = Field(default=None, description="Ruta opcional para guardar el JSON exportado"),
@@ -169,7 +187,13 @@ def export_rocketbot_db_obsidian(
     )
 
 
-@mcp.tool(description="Escanea package.json de módulos Rocketbot y devuelve un catálogo estructurado.")
+@mcp.tool(
+    description=(
+        "Escanea los package.json de Rocketbot/modules y devuelve nombres, comandos, "
+        "parámetros y compatibilidad. Úsala antes de crear una DB que requiera módulos "
+        "externos para evitar inventar comandos o campos."
+    )
+)
 def scan_rocketbot_modules_catalog(
     modules_dir: str = Field(description="Directorio Rocketbot/modules"),
 ) -> dict[str, object]:

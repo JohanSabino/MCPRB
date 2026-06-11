@@ -14,7 +14,7 @@ from core.file_reader import read_text_file, resolve_project_path
 from core.logs import list_log_files, read_log_file_tail, read_log_tail
 from core.module_catalog import export_module_catalog_json, export_module_catalog_obsidian, scan_rocketbot_modules
 from core.obsidian_exporter import export_rocketbot_db_to_obsidian
-from core.paths import describe_paths, logs_dir, projects_dir, variables_file
+from core.paths import describe_paths, logs_dir, modules_dir as detected_modules_dir, projects_dir, variables_file
 from core.searcher import search_text
 from core.variables import load_variables
 
@@ -234,29 +234,60 @@ def export_rocketbot_db_obsidian(
     )
 )
 def scan_rocketbot_modules_catalog(
-    modules_dir: str = Field(description="Directorio Rocketbot/modules"),
+    modules_dir: str | None = Field(
+        default=None,
+        description=(
+            "Ruta absoluta opcional de la carpeta modules. Si se omite, usa "
+            "ROCKETBOT_MODULES_DIR o la autodetección."
+        ),
+    ),
 ) -> dict[str, object]:
-    return scan_rocketbot_modules(modules_dir)
+    target = (
+        Path(modules_dir).expanduser().resolve()
+        if isinstance(modules_dir, str) and modules_dir.strip()
+        else detected_modules_dir()
+    )
+    return scan_rocketbot_modules(str(target))
 
 
 @mcp.tool(description="Exporta catálogo de módulos Rocketbot a JSON.")
 def export_rocketbot_modules_json(
-    modules_dir: str = Field(description="Directorio Rocketbot/modules"),
+    modules_dir: str | None = Field(
+        default=None,
+        description="Ruta opcional de modules; si se omite usa la autodetección",
+    ),
     output_json_path: str | None = Field(default=None, description="Ruta opcional de salida JSON"),
 ) -> dict[str, object]:
+    target = (
+        Path(modules_dir).expanduser().resolve()
+        if isinstance(modules_dir, str) and modules_dir.strip()
+        else detected_modules_dir()
+    )
     return export_module_catalog_json(
-        modules_dir=modules_dir,
-        output_json_path=output_json_path,
+        modules_dir=str(target),
+        output_json_path=(
+            output_json_path
+            if isinstance(output_json_path, str) and output_json_path.strip()
+            else None
+        ),
     )
 
 
 @mcp.tool(description="Exporta catálogo de módulos Rocketbot a Markdown para Obsidian.")
 def export_rocketbot_modules_obsidian(
-    modules_dir: str = Field(description="Directorio Rocketbot/modules"),
     output_dir: str = Field(description="Directorio destino para notas Markdown"),
+    modules_dir: str | None = Field(
+        default=None,
+        description="Ruta opcional de modules; si se omite usa la autodetección",
+    ),
 ) -> dict[str, object]:
+    target = (
+        Path(modules_dir).expanduser().resolve()
+        if isinstance(modules_dir, str) and modules_dir.strip()
+        else detected_modules_dir()
+    )
     return export_module_catalog_obsidian(
-        modules_dir=modules_dir,
+        modules_dir=str(target),
         output_dir=output_dir,
     )
 

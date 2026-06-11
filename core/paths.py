@@ -62,6 +62,26 @@ def logs_dir() -> Path:
     return (_existing_dir(candidates) or (root / "logs")).resolve()
 
 
+def modules_dir() -> Path:
+    env_value = os.getenv("ROCKETBOT_MODULES_DIR", "").strip()
+    if env_value:
+        return Path(env_value).expanduser().resolve()
+
+    home = Path.home()
+    root = rocketbot_home()
+    candidates = [
+        root / "modules",
+        root / "Modules",
+        root / "Rocketbot" / "modules",
+        home / "Desktop" / "Rocketbot" / "Rocketbot" / "modules",
+        home / "Desktop" / "Rocketbot" / "modules",
+        home / "Documents" / "Rocketbot" / "Rocketbot" / "modules",
+        Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Rocketbot" / "modules",
+        Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Rocketbot" / "modules",
+    ]
+    return (_existing_dir(candidates) or (root / "modules")).resolve()
+
+
 def variables_file() -> Path:
     env_value = os.getenv("ROCKETBOT_VARIABLES_FILE", "").strip()
     if env_value:
@@ -83,5 +103,6 @@ def describe_paths() -> dict[str, str]:
         "rocketbot_home": str(rocketbot_home()),
         "projects_dir": str(projects_dir()),
         "logs_dir": str(logs_dir()),
+        "modules_dir": str(modules_dir()),
         "variables_file": str(variables_file()),
     }

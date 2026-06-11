@@ -53,6 +53,7 @@ Variables:
 ROCKETBOT_HOME=
 ROCKETBOT_PROJECTS_DIR=
 ROCKETBOT_LOGS_DIR=
+ROCKETBOT_MODULES_DIR=
 ROCKETBOT_VARIABLES_FILE=
 MCP_TRANSPORT=stdio
 MCP_HOST=127.0.0.1
@@ -197,8 +198,7 @@ Prompt de ejemplo:
 Usa el MCP Rocketbot para crear:
 C:\Bots\Salida\GestionCorreos.db
 
-La instalación de módulos está en:
-C:\Rocketbot\modules
+Si conoces la carpeta de módulos, úsala. Si no, permite que el MCP la detecte.
 
 Requerimiento:
 - Crear un bot principal llamado main.
@@ -209,7 +209,7 @@ Requerimiento:
 - HU05: enviar un correo con el resultado.
 
 Antes de construir el flujo:
-1. Ejecuta scan_rocketbot_modules_catalog sobre C:\Rocketbot\modules.
+1. Ejecuta scan_rocketbot_modules_catalog sin ruta para usar la autodetección.
 2. Usa los nombres, comandos y campos reales encontrados en package.json.
 3. No inventes módulos ni parámetros.
 4. Separa cada HU en un subrobot.
@@ -245,6 +245,20 @@ Tipos de acción simplificados soportados:
 
 Otros comandos pueden generarse como módulos genéricos, pero deben construirse
 con los valores reales del `package.json` del módulo.
+
+La carpeta de módulos se resuelve en este orden:
+
+1. `ROCKETBOT_MODULES_DIR` en `.env`
+2. `modules` dentro de `ROCKETBOT_HOME`
+3. ubicaciones comunes de Rocketbot en Escritorio, Documentos y Program Files
+
+También puede indicarse una ruta concreta:
+
+```json
+{
+  "modules_dir": "D:\\Apps\\Rocketbot\\Rocketbot\\modules"
+}
+```
 
 ### Desde Inspector MCP
 

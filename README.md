@@ -235,11 +235,9 @@ Tool: `export_rocketbot_db_obsidian`
 - `build/`
 - `*.egg-info/`
 
-Si todavía no existe repo remoto:
+Crear repo vacío en GitHub.
 
-1. crear repo vacío en GitHub
-2. copiar la URL HTTPS o SSH
-3. ejecutar:
+Luego:
 
 ```powershell
 git init
@@ -249,21 +247,3 @@ git branch -M main
 git remote add origin <URL_DEL_REPO>
 git push -u origin main
 ```
-
-Si ya existe repo remoto:
-
-```powershell
-git init
-git add .
-git commit -m "Initial commit"
-git branch -M main
-git remote add origin <URL_DEL_REPO>
-git push -u origin main
-```
-
-## Seguridad
-
-- no versionar `.env`
-- no pegar credenciales en issues, README o ejemplos
-- usar `include_raw_data=false` salvo necesidad real
-- exportar `.db`, JSON y Obsidian fuera del repo si contienen datos sensibles

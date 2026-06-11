@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 from core.db_builder import create_rocketbot_db, create_rocketbot_db_from_bots, export_rocketbot_db
 from core.file_reader import read_text_file, resolve_project_path
-from core.logs import list_log_files, read_log_tail
+from core.logs import list_log_files, read_log_file_tail, read_log_tail
 from core.module_catalog import export_module_catalog_json, export_module_catalog_obsidian, scan_rocketbot_modules
 from core.obsidian_exporter import export_rocketbot_db_to_obsidian
 from core.paths import describe_paths, logs_dir, projects_dir, variables_file
@@ -93,22 +93,61 @@ def search_in_project(
     return search_text(root, query=query, file_pattern=file_pattern, max_results=max_results)
 
 
-@mcp.tool(description="Lista archivos de log disponibles.")
-def list_rocketbot_logs() -> list[str]:
-    return list_log_files(logs_dir())
+@mcp.tool(
+    description=(
+        "Lista archivos .log. Acepta una ruta absoluta opcional; si se omite, "
+        "usa ROCKETBOT_LOGS_DIR o la ruta autodetectada."
+    )
+)
+def list_rocketbot_logs(
+    logs_path: str | None = Field(
+        default=None,
+        description="Ruta absoluta opcional del directorio de logs",
+    ),
+) -> list[str]:
+    target = Path(logs_path).expanduser().resolve() if logs_path else logs_dir()
+    return list_log_files(target)
 
 
-@mcp.tool(description="Lee las últimas líneas de un log Rocketbot.")
+@mcp.tool(
+    description=(
+        "Lee las últimas líneas de un log. Usa log_path para cualquier archivo "
+        "absoluto, o log_name junto con logs_path. Sin rutas usa el directorio configurado."
+    )
+)
 def read_rocketbot_log(
     log_name: str | None = Field(default=None, description="Nombre del archivo .log; si se omite usa el más reciente"),
     lines: int = Field(default=200, ge=1, le=5000),
+    log_path: str | None = Field(
+        default=None,
+        description="Ruta absoluta opcional de un archivo de log concreto",
+    ),
+    logs_path: str | None = Field(
+        default=None,
+        description="Ruta absoluta opcional del directorio que contiene log_name",
+    ),
 ) -> str:
-    return read_log_tail(logs_dir(), log_name=log_name, lines=lines)
+    if log_path:
+        return read_log_file_tail(Path(log_path).expanduser().resolve(), lines=lines)
+
+    target_dir = Path(logs_path).expanduser().resolve() if logs_path else logs_dir()
+    return read_log_tail(target_dir, log_name=log_name, lines=lines)
 
 
-@mcp.tool(description="Carga variables Rocketbot desde el archivo configurado.")
-def get_rocketbot_variables() -> dict[str, object]:
-    return load_variables(variables_file())
+@mcp.tool(
+    description=(
+        "Carga variables desde un archivo JSON, INI, ENV o TXT. Acepta una ruta "
+        "absoluta opcional; si se omite, usa ROCKETBOT_VARIABLES_FILE."
+    )
+)
+def get_rocketbot_variables(
+    variables_path: str | None = Field(
+        default=None,
+        description="Ruta absoluta opcional del archivo de variables",
+    ),
+) -> dict[str, object]:
+    target = Path(variables_path).expanduser().resolve() if variables_path else variables_file()
+    return load_variables(target)
 
 
 @mcp.tool(

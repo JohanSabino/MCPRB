@@ -147,6 +147,48 @@ Usa export_rocketbot_db_obsidian para generar la documentación.
 La ruta de la DB puede estar en cualquier carpeta accesible para el usuario que
 ejecuta el MCP.
 
+### Leer logs y variables desde cualquier ruta
+
+Prompt de ejemplo:
+
+```text
+Usa el MCP Rocketbot.
+
+Lee las últimas 300 líneas de:
+D:\Ejecuciones\ClienteA\rocketbot.log
+
+Después carga las variables desde:
+D:\Ejecuciones\ClienteA\variables.json
+
+Relaciona los errores del log con las variables, sin mostrar secretos completos.
+```
+
+Llamadas equivalentes:
+
+```json
+{
+  "log_path": "D:\\Ejecuciones\\ClienteA\\rocketbot.log",
+  "lines": 300
+}
+```
+
+```json
+{
+  "variables_path": "D:\\Ejecuciones\\ClienteA\\variables.json"
+}
+```
+
+Para listar una carpeta de logs:
+
+```json
+{
+  "logs_path": "D:\\Ejecuciones\\ClienteA\\logs"
+}
+```
+
+Si no se envían rutas, las tools mantienen el comportamiento anterior y usan
+las rutas configuradas en `.env` o autodetectadas.
+
 ### Crear una DB desde un requerimiento
 
 Prompt de ejemplo:

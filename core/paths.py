@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+
+def _existing_dir(candidates: list[Path]) -> Path | None:
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_dir():
+            return candidate
+    return None
+
+
+def _existing_file(candidates: list[Path]) -> Path | None:
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
+def rocketbot_home() -> Path:
+    env_value = os.getenv("ROCKETBOT_HOME", "").strip()
+    if env_value:
+        return Path(env_value).expanduser().resolve()
+
+    home = Path.home()
+    candidates = [
+        home / "Rocketbot",
+        home / "Documents" / "Rocketbot",
+        home / "AppData" / "Local" / "Rocketbot",
+        home / "AppData" / "Roaming" / "Rocketbot",
+    ]
+    return (_existing_dir(candidates) or (home / "Rocketbot")).resolve()
+
+
+def projects_dir() -> Path:
+    env_value = os.getenv("ROCKETBOT_PROJECTS_DIR", "").strip()
+    if env_value:
+        return Path(env_value).expanduser().resolve()
+
+    root = rocketbot_home()
+    candidates = [
+        root / "projects",
+        root / "Projects",
+        root / "modules",
+        root,
+    ]
+    return (_existing_dir(candidates) or (root / "projects")).resolve()
+
+
+def logs_dir() -> Path:
+    env_value = os.getenv("ROCKETBOT_LOGS_DIR", "").strip()
+    if env_value:
+        return Path(env_value).expanduser().resolve()
+
+    root = rocketbot_home()
+    candidates = [
+        root / "logs",
+        root / "Logs",
+        root / "log",
+    ]
+    return (_existing_dir(candidates) or (root / "logs")).resolve()
+
+
+def variables_file() -> Path:
+    env_value = os.getenv("ROCKETBOT_VARIABLES_FILE", "").strip()
+    if env_value:
+        return Path(env_value).expanduser().resolve()
+
+    root = rocketbot_home()
+    candidates = [
+        root / "variables.json",
+        root / "Variables.json",
+        root / "variables.ini",
+        root / "variables.env",
+        root / "variables.txt",
+    ]
+    return (_existing_file(candidates) or (root / "variables.json")).resolve()
+
+
+def describe_paths() -> dict[str, str]:
+    return {
+        "rocketbot_home": str(rocketbot_home()),
+        "projects_dir": str(projects_dir()),
+        "logs_dir": str(logs_dir()),
+        "variables_file": str(variables_file()),
+    }

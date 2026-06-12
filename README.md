@@ -231,6 +231,12 @@ Tipos de acción simplificados soportados:
 
 - `set_variable`
 - `exec_subrobot`
+- `if`
+- `for`
+- `try_catch`
+- `finally`
+- `break`
+- `continue`
 - `open_browser`
 - `wait_for_object`
 - `click`
@@ -245,6 +251,76 @@ Tipos de acción simplificados soportados:
 
 Otros comandos pueden generarse como módulos genéricos, pero deben construirse
 con los valores reales del `package.json` del módulo.
+
+La lógica de control es nativa de Rocketbot. No debe buscarse ni generarse como
+un módulo externo.
+
+Ejemplo:
+
+```json
+{
+  "type": "try_catch",
+  "try": [
+    {
+      "type": "for",
+      "iterable": "{vLocLstCorreos}",
+      "body": [
+        {
+          "type": "if",
+          "condition": "'{vLocBooProcesar}' == 'True'",
+          "then": [
+            {
+              "type": "o365_read_email",
+              "message_id": "{vLocStrIdCorreo}"
+            }
+          ],
+          "else": [
+            {
+              "type": "continue"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "catch": [
+    {
+      "type": "set_variable",
+      "variable": "vLocBooError",
+      "value": true
+    }
+  ],
+  "finally": [
+    {
+      "type": "set_variable",
+      "variable": "vLocStrEstado",
+      "value": "Finalizado"
+    }
+  ]
+}
+```
+
+Una acción desconocida solo se trata como módulo externo si incluye
+`module_name` y `module`. De lo contrario, la creación falla indicando el tipo
+no soportado.
+
+Formato recomendado para un evento/comando de módulo:
+
+```json
+{
+  "type": "module",
+  "module_name": "Files",
+  "module": "exists",
+  "params": {
+    "path": "C:\\Bots\\entrada.xlsx",
+    "var_": "vLocBooArchivoExiste"
+  }
+}
+```
+
+Los nombres dentro de `params` deben coincidir con los `id` publicados por
+`scan_rocketbot_modules_catalog`. El catálogo incluye valores predeterminados,
+campos obligatorios, opciones y tipos de datos de cada entrada.
 
 La carpeta de módulos se resuelve en este orden:
 

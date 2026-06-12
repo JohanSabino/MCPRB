@@ -39,6 +39,13 @@ def _extract_inputs(form: dict[str, Any]) -> list[dict[str, Any]]:
                 "description": field.get("description", {}),
                 "placeholder": field.get("placeholder", {}),
                 "help": field.get("help", {}),
+                "default": field.get("default"),
+                "required": field.get("required"),
+                "options": field.get("options"),
+                "data_type": field.get("data_type"),
+                "remove_vars": field.get("remove_vars"),
+                "src": field.get("src"),
+                "style": field.get("style"),
             }
         )
     return extracted
@@ -89,6 +96,8 @@ def scan_rocketbot_modules(modules_dir: str) -> dict[str, Any]:
                         "en": _pick_lang_block(child, "en").get("description", ""),
                         "pr": _pick_lang_block(child, "pr").get("description", ""),
                     },
+                    "form_css": form.get("css"),
+                    "form_style": form.get("style"),
                     "inputs": _extract_inputs(form),
                 }
             )
@@ -112,6 +121,15 @@ def scan_rocketbot_modules(modules_dir: str) -> dict[str, Any]:
 
     return {
         "modules_dir": str(base),
+        "catalog_scope": "external_modules_only",
+        "native_logic": [
+            "if",
+            "for",
+            "try_catch",
+            "finally",
+            "break",
+            "continue",
+        ],
         "modules_count": len(modules),
         "modules": modules,
     }

@@ -153,7 +153,8 @@ def get_rocketbot_variables(
 @mcp.tool(
     description=(
         "Crea un archivo .db SQLite compatible con Rocketbot en formato normal. "
-        "Acepta una definición JSON con bot principal, HUs/subrobots, variables y comandos. "
+        "Acepta una definición JSON con bot principal, HUs/subrobots, variables, comandos "
+        "y lógica nativa if/for/try_catch/finally/break/continue. "
         "Antes de usar módulos externos, consulta scan_rocketbot_modules_catalog y usa "
         "los nombres y parámetros reales del package.json."
     )
@@ -229,8 +230,9 @@ def export_rocketbot_db_obsidian(
 @mcp.tool(
     description=(
         "Escanea los package.json de Rocketbot/modules y devuelve nombres, comandos, "
-        "parámetros y compatibilidad. Úsala antes de crear una DB que requiera módulos "
-        "externos para evitar inventar comandos o campos."
+        "parámetros y compatibilidad de módulos externos. No contiene lógica nativa como "
+        "if, for o try/catch. Úsala antes de crear una DB que requiera módulos externos "
+        "para evitar inventar comandos o campos."
     )
 )
 def scan_rocketbot_modules_catalog(

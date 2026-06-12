@@ -481,11 +481,21 @@ def _build_o365_send_email(action: dict[str, Any], index: int, line: str | int) 
 
 def _build_generic_module(action: dict[str, Any], index: int, line: str | int) -> dict[str, Any]:
     action_type = str(action.get("type", "customModule"))
-    payload = {key: value for key, value in action.items() if key != "description"}
-    if "module" not in payload:
-        payload["module"] = action_type
-    if "module_name" not in payload:
-        payload["module_name"] = str(action.get("module_name", "Custom"))
+    params = action.get("params", {})
+    if params is not None and not isinstance(params, dict):
+        raise ValueError("params debe ser un objeto JSON")
+
+    ignored = {"type", "description", "group", "params"}
+    payload = {key: value for key, value in action.items() if key not in ignored}
+    payload.update(params or {})
+    module_name = str(action.get("module_name", "")).strip()
+    module_command = str(
+        action.get("module") or (action_type if action_type != "module" else "")
+    ).strip()
+    payload["module"] = module_command
+    payload["module_name"] = module_name
+    if not module_name or not module_command:
+        raise ValueError("Los módulos externos requieren module_name y module")
 
     cmd = _command_base(
         father="module",
@@ -499,8 +509,138 @@ def _build_generic_module(action: dict[str, Any], index: int, line: str | int) -
     return cmd
 
 
+def _build_nested_actions(
+    actions: Any,
+    parent_line: str | int | None = None,
+) -> list[dict[str, Any]]:
+    if actions is None:
+        return []
+    if not isinstance(actions, list):
+        raise ValueError("Las acciones anidadas deben ser una lista")
+
+    commands: list[dict[str, Any]] = []
+    for action in actions:
+        if not isinstance(action, dict):
+            raise ValueError("Cada acción debe ser un objeto JSON")
+
+        index = len(commands)
+        line = f"{parent_line}.{index + 1}" if parent_line is not None else index + 1
+        commands.append(_build_action(action, index=index, line=line))
+
+        action_type = str(action.get("type", "")).strip().lower()
+        finally_actions = action.get("finally")
+        if action_type in {"try", "try_catch", "trycatch"} and finally_actions:
+            finally_index = len(commands)
+            finally_line = (
+                f"{parent_line}.{finally_index + 1}"
+                if parent_line is not None
+                else finally_index + 1
+            )
+            commands.append(
+                _build_finally(
+                    {"body": finally_actions, "description": action.get("finally_description", "")},
+                    index=finally_index,
+                    line=finally_line,
+                )
+            )
+
+    return commands
+
+
+def _build_if(action: dict[str, Any], index: int, line: str | int) -> dict[str, Any]:
+    cmd = _command_base(
+        father="evaluateIf",
+        command=str(action.get("condition", action.get("command", ""))),
+        group="logic",
+        index=index,
+        line=line,
+        description=str(action.get("description", "")),
+    )
+    cmd["children"] = _build_nested_actions(
+        action.get("then", action.get("children", [])),
+        parent_line=line,
+    )
+    cmd["else"] = _build_nested_actions(action.get("else", []), parent_line=line)
+    return cmd
+
+
+def _build_for(action: dict[str, Any], index: int, line: str | int) -> dict[str, Any]:
+    cmd = _command_base(
+        father="for",
+        command=json.dumps(
+            {
+                "iterable": str(action.get("iterable", "")),
+                "count": int(action.get("count", 0)),
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        group="logic",
+        index=index,
+        line=line,
+        description=str(action.get("description", "")),
+    )
+    cmd["children"] = _build_nested_actions(
+        action.get("body", action.get("children", [])),
+        parent_line=line,
+    )
+    return cmd
+
+
+def _build_try_catch(action: dict[str, Any], index: int, line: str | int) -> dict[str, Any]:
+    cmd = _command_base(
+        father="trycatch",
+        command="",
+        group="logic",
+        index=index,
+        line=line,
+        description=str(action.get("description", "")),
+    )
+    cmd["children"] = _build_nested_actions(
+        action.get("try", action.get("children", [])),
+        parent_line=line,
+    )
+    cmd["else"] = _build_nested_actions(
+        action.get("catch", action.get("else", [])),
+        parent_line=line,
+    )
+    return cmd
+
+
+def _build_finally(action: dict[str, Any], index: int, line: str | int) -> dict[str, Any]:
+    cmd = _command_base(
+        father="finally",
+        command="",
+        group="logic",
+        index=index,
+        line=line,
+        description=str(action.get("description", "")),
+    )
+    cmd["children"] = _build_nested_actions(
+        action.get("body", action.get("children", [])),
+        parent_line=line,
+    )
+    return cmd
+
+
+def _build_loop_control(
+    action: dict[str, Any],
+    index: int,
+    line: str | int,
+    father: str,
+) -> dict[str, Any]:
+    return _command_base(
+        father=father,
+        command="",
+        group="logic",
+        index=index,
+        line=line,
+        description=str(action.get("description", "")),
+    )
+
+
 def _build_action(action: dict[str, Any], index: int, line: str | int) -> dict[str, Any]:
-    action_type = str(action.get("type", "")).strip()
+    action_type = str(action.get("type", "")).strip().lower()
     if action_type == "set_variable":
         return _build_set_var(action, index=index, line=line)
     if action_type in {"exec_subrobot", "exec_robot", "exec_rocketbot_db"}:
@@ -532,7 +672,27 @@ def _build_action(action: dict[str, Any], index: int, line: str | int) -> dict[s
         return _build_o365_read_email(action, index=index, line=line)
     if action_type in {"send_email", "o365_send_email"}:
         return _build_o365_send_email(action, index=index, line=line)
-    return _build_generic_module(action, index=index, line=line)
+    if action_type in {"if", "condition", "evaluate_if"}:
+        return _build_if(action, index=index, line=line)
+    if action_type in {"for", "foreach"}:
+        return _build_for(action, index=index, line=line)
+    if action_type in {"try", "try_catch", "trycatch"}:
+        return _build_try_catch(action, index=index, line=line)
+    if action_type == "finally":
+        return _build_finally(action, index=index, line=line)
+    if action_type in {"break", "continue"}:
+        return _build_loop_control(
+            action,
+            index=index,
+            line=line,
+            father=action_type,
+        )
+    if action_type == "module" or action.get("module_name") or action.get("module"):
+        return _build_generic_module(action, index=index, line=line)
+    raise ValueError(
+        f"Tipo de acción no soportado: {action_type or '<vacío>'}. "
+        "Para módulos externos incluye module_name y module."
+    )
 
 
 def _compile_dsl_bot(item: dict[str, Any], index: int) -> BotDefinition:
@@ -629,12 +789,7 @@ def _compile_dsl_subbots(item: dict[str, Any], start_id: int) -> list[BotDefinit
 
         actions = module.get("commands", [])
         if isinstance(actions, list):
-            for action_index, action in enumerate(actions):
-                if not isinstance(action, dict):
-                    continue
-                root["commands"].append(
-                    _build_action(action, index=action_index, line=action_index + 1)
-                )
+            root["commands"].extend(_build_nested_actions(actions))
 
         compiled.append(
             BotDefinition(

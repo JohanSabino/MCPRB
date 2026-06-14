@@ -106,3 +106,23 @@ def describe_paths() -> dict[str, str]:
         "modules_dir": str(modules_dir()),
         "variables_file": str(variables_file()),
     }
+
+
+def describe_paths_status() -> dict[str, dict[str, object]]:
+    definitions = {
+        "rocketbot_home": (rocketbot_home(), "directory", "ROCKETBOT_HOME"),
+        "projects_dir": (projects_dir(), "directory", "ROCKETBOT_PROJECTS_DIR"),
+        "logs_dir": (logs_dir(), "directory", "ROCKETBOT_LOGS_DIR"),
+        "modules_dir": (modules_dir(), "directory", "ROCKETBOT_MODULES_DIR"),
+        "variables_file": (variables_file(), "file", "ROCKETBOT_VARIABLES_FILE"),
+    }
+    return {
+        name: {
+            "path": str(path),
+            "exists": path.exists(),
+            "kind": kind,
+            "configured": bool(os.getenv(environment_name, "").strip()),
+            "environment": environment_name,
+        }
+        for name, (path, kind, environment_name) in definitions.items()
+    }

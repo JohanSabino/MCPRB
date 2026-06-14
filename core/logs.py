@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.file_reader import read_text_file
+from core.file_reader import resolve_project_path
+
+
+TAIL_CHUNK_SIZE = 8192
+MAX_TAIL_BYTES = 5_000_000
 
 
 def list_log_files(logs_path: Path) -> list[str]:
@@ -18,8 +22,27 @@ def read_log_file_tail(log_path: Path, lines: int = 200) -> str:
         raise FileNotFoundError(f"No existe archivo de log: {log_path}")
     if not log_path.is_file():
         raise ValueError(f"No es archivo: {log_path}")
+    if lines < 1:
+        return ""
 
-    content = read_text_file(log_path, max_chars=200_000)
+    chunks: list[bytes] = []
+    bytes_read = 0
+    newline_count = 0
+
+    with log_path.open("rb") as handle:
+        handle.seek(0, 2)
+        position = handle.tell()
+
+        while position > 0 and newline_count <= lines and bytes_read < MAX_TAIL_BYTES:
+            read_size = min(TAIL_CHUNK_SIZE, position, MAX_TAIL_BYTES - bytes_read)
+            position -= read_size
+            handle.seek(position)
+            chunk = handle.read(read_size)
+            chunks.append(chunk)
+            bytes_read += len(chunk)
+            newline_count += chunk.count(b"\n")
+
+    content = b"".join(reversed(chunks)).decode("utf-8", errors="replace")
     return "\n".join(content.splitlines()[-lines:])
 
 
@@ -30,7 +53,7 @@ def read_log_tail(logs_path: Path, log_name: str | None = None, lines: int = 200
         raise ValueError(f"No es directorio: {logs_path}")
 
     if log_name:
-        target = logs_path / log_name
+        target = resolve_project_path(logs_path, log_name)
     else:
         candidates = sorted(
             (path for path in logs_path.glob("*.log") if path.is_file()),

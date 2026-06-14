@@ -60,12 +60,14 @@ MCP_HOST=127.0.0.1
 MCP_PORT=8000
 MCP_SSE_PATH=/sse
 MCP_STREAMABLE_HTTP_PATH=/mcp
+MCP_ENABLE_RESOURCES=false
 ```
 
 Notas:
 
 - `mcp_server.py` sí respeta `MCP_TRANSPORT`
 - `main.py` fuerza `stdio`
+- `MCP_ENABLE_RESOURCES=false` evita que OpenCode muestre resources como comandos `@`
 - no subir `.env`
 - no subir `.venv`
 
@@ -116,8 +118,14 @@ Qué hace:
 
 - conecta por `stdio`
 - lista tools
-- lista resources
-- lee `rocketbot://paths`
+- lista resources si están habilitados
+- lee `rocketbot://paths` solo si está disponible
+
+## Pruebas
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
 
 ## Consumo
 
@@ -209,23 +217,29 @@ Requerimiento:
 - HU05: enviar un correo con el resultado.
 
 Antes de construir el flujo:
-1. Ejecuta scan_rocketbot_modules_catalog sin ruta para usar la autodetección.
+1. Ejecuta search_rocketbot_module_commands para cada capacidad requerida.
 2. Usa los nombres, comandos y campos reales encontrados en package.json.
 3. No inventes módulos ni parámetros.
 4. Separa cada HU en un subrobot.
 5. Crea variables con la convención v<Scope><Type><Nombre>.
 6. Haz que main ejecute las HU en orden.
-7. Genera la DB con create_rocketbot_db_file y overwrite=true.
-8. Exporta la DB creada a JSON para verificar el resultado.
-9. Informa bots creados, módulos usados y ruta final.
+7. Ejecuta validate_rocketbot_definition.
+8. Genera la DB con create_rocketbot_db_file y overwrite=true.
+9. Exporta la DB creada a JSON para verificar el resultado.
+10. Informa bots creados, módulos usados y ruta final.
 ```
 
 El agente debería ejecutar este flujo:
 
-1. `scan_rocketbot_modules_catalog`
+1. `search_rocketbot_module_commands`
 2. construir el objeto JSON con `main`, HUs, variables y comandos
-3. `create_rocketbot_db_file`
-4. `export_rocketbot_db_json`
+3. `validate_rocketbot_definition`
+4. `create_rocketbot_db_file`
+5. `export_rocketbot_db_json`
+
+`create_rocketbot_db_file` valida módulos por defecto. Usa
+`validate_modules=false` solo para generar una DB destinada a otra instalación
+que tenga módulos diferentes.
 
 Tipos de acción simplificados soportados:
 
@@ -233,10 +247,10 @@ Tipos de acción simplificados soportados:
 - `exec_subrobot`
 - `if`
 - `for`
+- `while`
 - `try_catch`
-- `finally`
 - `break`
-- `continue`
+- `group`
 - `open_browser`
 - `wait_for_object`
 - `click`
@@ -264,6 +278,7 @@ Ejemplo:
     {
       "type": "for",
       "iterable": "{vLocLstCorreos}",
+      "var": "vLocObjCorreo",
       "body": [
         {
           "type": "if",
@@ -271,12 +286,12 @@ Ejemplo:
           "then": [
             {
               "type": "o365_read_email",
-              "message_id": "{vLocStrIdCorreo}"
+              "email_id": "{vLocObjCorreo['id']}"
             }
           ],
           "else": [
             {
-              "type": "continue"
+              "type": "break"
             }
           ]
         }
@@ -288,13 +303,6 @@ Ejemplo:
       "type": "set_variable",
       "variable": "vLocBooError",
       "value": true
-    }
-  ],
-  "finally": [
-    {
-      "type": "set_variable",
-      "variable": "vLocStrEstado",
-      "value": "Finalizado"
     }
   ]
 }
@@ -319,7 +327,8 @@ Formato recomendado para un evento/comando de módulo:
 ```
 
 Los nombres dentro de `params` deben coincidir con los `id` publicados por
-`scan_rocketbot_modules_catalog`. El catálogo incluye valores predeterminados,
+`search_rocketbot_module_commands`. El catálogo completo sigue disponible con
+`scan_rocketbot_modules_catalog`. Incluye valores predeterminados,
 campos obligatorios, opciones y tipos de datos de cada entrada.
 
 La carpeta de módulos se resuelve en este orden:
@@ -419,6 +428,7 @@ Tool: `export_rocketbot_db_obsidian`
 ## Tools disponibles
 
 - `get_rocketbot_paths`
+- `get_rocketbot_status`
 - `list_projects`
 - `list_project_files`
 - `read_project_file`
@@ -431,10 +441,24 @@ Tool: `export_rocketbot_db_obsidian`
 - `export_rocketbot_db_json`
 - `export_rocketbot_db_obsidian`
 - `scan_rocketbot_modules_catalog`
+- `search_rocketbot_module_commands`
+- `validate_rocketbot_definition`
 - `export_rocketbot_modules_json`
 - `export_rocketbot_modules_obsidian`
 
 ## Resources
 
+- deshabilitados por defecto
+- habilitar con `MCP_ENABLE_RESOURCES=true`
 - `rocketbot://paths`
 - `rocketbot://variables`
+- no son tools y no deben invocarse con `@` en OpenCode
+- reiniciar el MCP o OpenCode después de cambiar esta variable
+
+## Seguridad
+
+- no versionar `.env`, `.venv`, credenciales, tokens ni secretos
+- no pegar credenciales en prompts, issues, README ni ejemplos
+- usar `include_raw_data=false` salvo necesidad real
+- revisar logs y variables antes de compartirlos
+- guardar `.db`, JSON y notas Obsidian fuera del repo si contienen datos sensibles

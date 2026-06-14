@@ -9,7 +9,10 @@ FOOTER = "skill made by Johan Sabino  \nhttps://www.linkedin.com/in/johanandress
 
 
 def _read_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    parsed = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    if not isinstance(parsed, dict):
+        raise ValueError("package.json debe contener un objeto JSON")
+    return parsed
 
 
 def _normalize_text(value: Any) -> str:
@@ -57,13 +60,24 @@ def scan_rocketbot_modules(modules_dir: str) -> dict[str, Any]:
         raise FileNotFoundError(f"No existe directorio de módulos: {base}")
 
     modules: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
 
     for module_dir in sorted(path for path in base.iterdir() if path.is_dir()):
         package_path = module_dir / "package.json"
         if not package_path.exists():
             continue
 
-        package = _read_json(package_path)
+        try:
+            package = _read_json(package_path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            errors.append(
+                {
+                    "module_directory": str(module_dir),
+                    "package_json": str(package_path),
+                    "error": str(exc),
+                }
+            )
+            continue
         children = package.get("children", [])
         if not isinstance(children, list):
             children = []
@@ -125,13 +139,76 @@ def scan_rocketbot_modules(modules_dir: str) -> dict[str, Any]:
         "native_logic": [
             "if",
             "for",
+            "while",
             "try_catch",
-            "finally",
             "break",
-            "continue",
+            "group",
         ],
         "modules_count": len(modules),
+        "errors_count": len(errors),
+        "errors": errors,
         "modules": modules,
+    }
+
+
+def search_rocketbot_modules(
+    modules_dir: str,
+    query: str,
+    module_name: str | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    normalized_query = query.strip().casefold()
+    normalized_module = (module_name or "").strip().casefold()
+    if not normalized_query:
+        raise ValueError("query no puede estar vacío")
+
+    catalog = scan_rocketbot_modules(modules_dir)
+    matches: list[dict[str, Any]] = []
+
+    for package in catalog["modules"]:
+        package_name = str(package.get("name", ""))
+        for command in package.get("commands", []):
+            command_module_name = str(command.get("module_name", "") or package_name)
+            if normalized_module and normalized_module not in {
+                package_name.casefold(),
+                command_module_name.casefold(),
+            }:
+                continue
+
+            inputs = command.get("inputs", [])
+            searchable = [
+                package_name,
+                command_module_name,
+                str(command.get("module", "")),
+                *[str(value) for value in command.get("title", {}).values()],
+                *[str(value) for value in command.get("description", {}).values()],
+                *[str(field.get("id", "")) for field in inputs],
+            ]
+            if not any(normalized_query in value.casefold() for value in searchable):
+                continue
+
+            matches.append(
+                {
+                    "package": package_name,
+                    "module_name": command_module_name,
+                    "module": command.get("module", ""),
+                    "title": command.get("title", {}),
+                    "description": command.get("description", {}),
+                    "inputs": inputs,
+                }
+            )
+            if len(matches) >= limit:
+                break
+        if len(matches) >= limit:
+            break
+
+    return {
+        "modules_dir": catalog["modules_dir"],
+        "query": query,
+        "module_name": module_name,
+        "matches_count": len(matches),
+        "matches": matches,
+        "catalog_errors": catalog["errors"],
     }
 
 

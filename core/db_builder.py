@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import sqlite3
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -60,19 +62,18 @@ def _normalize_project_payload(name: str, project: dict[str, Any] | None) -> dic
     if not project:
         return payload
 
-    if "project" in project and isinstance(project["project"], dict):
-        merged = payload["project"]
-        merged.update(project["project"])
-        profile = dict(payload["project"].get("profile", {}))
-        profile.update(merged.get("profile", {}))
-        merged["profile"] = profile
-        payload["project"] = merged
-        return payload
-
+    source = (
+        project["project"]
+        if "project" in project and isinstance(project["project"], dict)
+        else project
+    )
     merged = payload["project"]
-    merged.update(project)
-    profile = dict(payload["project"].get("profile", {}))
-    profile.update(merged.get("profile", {}))
+    default_profile = dict(merged["profile"])
+    source_profile = source.get("profile", {})
+    merged.update({key: value for key, value in source.items() if key != "profile"})
+    profile = default_profile
+    if isinstance(source_profile, dict):
+        profile.update(source_profile)
     merged["profile"] = profile
     payload["project"] = merged
     return payload
@@ -460,15 +461,15 @@ def _build_o365_send_email(action: dict[str, Any], index: int, line: str | int) 
         "subject": str(action.get("subject", "")),
         "session": str(action.get("session", "1")),
     }
-    body = action.get("body", action.get("body_", ""))
+    body = action.get("body", "")
     if body != "":
-        payload["body_"] = str(body)
-    cc = action.get("cc", action.get("cc_", ""))
+        payload["body"] = str(body)
+    cc = action.get("cc", "")
     if cc != "":
-        payload["cc_"] = str(cc)
-    bcc = action.get("bcc", action.get("bcc_", ""))
+        payload["cc"] = str(cc)
+    bcc = action.get("bcc", "")
     if bcc != "":
-        payload["bcc_"] = str(bcc)
+        payload["bcc"] = str(bcc)
     return _build_module_command(
         module_name="O365",
         module="sendEmail",
@@ -527,23 +528,6 @@ def _build_nested_actions(
         line = f"{parent_line}.{index + 1}" if parent_line is not None else index + 1
         commands.append(_build_action(action, index=index, line=line))
 
-        action_type = str(action.get("type", "")).strip().lower()
-        finally_actions = action.get("finally")
-        if action_type in {"try", "try_catch", "trycatch"} and finally_actions:
-            finally_index = len(commands)
-            finally_line = (
-                f"{parent_line}.{finally_index + 1}"
-                if parent_line is not None
-                else finally_index + 1
-            )
-            commands.append(
-                _build_finally(
-                    {"body": finally_actions, "description": action.get("finally_description", "")},
-                    index=finally_index,
-                    line=finally_line,
-                )
-            )
-
     return commands
 
 
@@ -565,16 +549,30 @@ def _build_if(action: dict[str, Any], index: int, line: str | int) -> dict[str, 
 
 
 def _build_for(action: dict[str, Any], index: int, line: str | int) -> dict[str, Any]:
+    payload = {"iterable": str(action.get("iterable", ""))}
+    variable = str(action.get("var", action.get("variable", ""))).strip()
+    if variable:
+        payload["var"] = variable
+
     cmd = _command_base(
         father="for",
-        command=json.dumps(
-            {
-                "iterable": str(action.get("iterable", "")),
-                "count": int(action.get("count", 0)),
-            },
-            ensure_ascii=False,
-            separators=(",", ":"),
-        ),
+        command=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+        group="logic",
+        index=index,
+        line=line,
+        description=str(action.get("description", "")),
+    )
+    cmd["children"] = _build_nested_actions(
+        action.get("body", action.get("children", [])),
+        parent_line=line,
+    )
+    return cmd
+
+
+def _build_while(action: dict[str, Any], index: int, line: str | int) -> dict[str, Any]:
+    cmd = _command_base(
+        father="evaluatewhile",
+        command=str(action.get("condition", action.get("command", ""))),
         group="logic",
         index=index,
         line=line,
@@ -607,9 +605,9 @@ def _build_try_catch(action: dict[str, Any], index: int, line: str | int) -> dic
     return cmd
 
 
-def _build_finally(action: dict[str, Any], index: int, line: str | int) -> dict[str, Any]:
+def _build_group(action: dict[str, Any], index: int, line: str | int) -> dict[str, Any]:
     cmd = _command_base(
-        father="finally",
+        father="group",
         command="",
         group="logic",
         index=index,
@@ -676,16 +674,18 @@ def _build_action(action: dict[str, Any], index: int, line: str | int) -> dict[s
         return _build_if(action, index=index, line=line)
     if action_type in {"for", "foreach"}:
         return _build_for(action, index=index, line=line)
+    if action_type == "while":
+        return _build_while(action, index=index, line=line)
     if action_type in {"try", "try_catch", "trycatch"}:
         return _build_try_catch(action, index=index, line=line)
-    if action_type == "finally":
-        return _build_finally(action, index=index, line=line)
-    if action_type in {"break", "continue"}:
+    if action_type == "group":
+        return _build_group(action, index=index, line=line)
+    if action_type == "break":
         return _build_loop_control(
             action,
             index=index,
             line=line,
-            father=action_type,
+            father="break",
         )
     if action_type == "module" or action.get("module_name") or action.get("module"):
         return _build_generic_module(action, index=index, line=line)
@@ -860,14 +860,19 @@ def create_rocketbot_db(
     if destination.exists() and not overwrite:
         raise FileExistsError(f"El archivo ya existe: {destination}")
 
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.exists():
-        destination.unlink()
-
     bots = compile_definition_to_bots(definition_json)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    file_descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+        dir=destination.parent,
+    )
+    os.close(file_descriptor)
+    temporary_path = Path(temporary_name)
 
-    connection = sqlite3.connect(destination)
+    connection: sqlite3.Connection | None = None
     try:
+        connection = sqlite3.connect(temporary_path)
         cursor = connection.cursor()
         cursor.execute(SCHEMA_SQL)
 
@@ -908,8 +913,17 @@ def create_rocketbot_db(
             )
 
         connection.commit()
-    finally:
         connection.close()
+        connection = None
+        os.replace(temporary_path, destination)
+    except Exception:
+        if connection is not None:
+            connection.close()
+        temporary_path.unlink(missing_ok=True)
+        raise
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
 
     return {
         "output_path": str(destination),

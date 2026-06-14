@@ -22,7 +22,7 @@ def _parse_key_value_lines(content: str) -> dict[str, str]:
 
 def load_variables(path: Path) -> dict[str, object]:
     if not path.exists():
-        return {}
+        raise FileNotFoundError(f"No existe archivo de variables: {path}")
     if not path.is_file():
         raise ValueError(f"No es archivo: {path}")
 

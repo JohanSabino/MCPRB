@@ -10,11 +10,24 @@ from pydantic import Field
 from dotenv import load_dotenv
 
 from core.db_builder import create_rocketbot_db, create_rocketbot_db_from_bots, export_rocketbot_db
-from core.file_reader import read_text_file, resolve_project_path
+from core.file_reader import ensure_within, read_text_file, resolve_project_path
 from core.logs import list_log_files, read_log_file_tail, read_log_tail
-from core.module_catalog import export_module_catalog_json, export_module_catalog_obsidian, scan_rocketbot_modules
+from core.module_catalog import (
+    export_module_catalog_json,
+    export_module_catalog_obsidian,
+    scan_rocketbot_modules,
+    search_rocketbot_modules,
+)
+from core.module_validation import validate_rocketbot_modules
 from core.obsidian_exporter import export_rocketbot_db_to_obsidian
-from core.paths import describe_paths, logs_dir, modules_dir as detected_modules_dir, projects_dir, variables_file
+from core.paths import (
+    describe_paths,
+    describe_paths_status,
+    logs_dir,
+    modules_dir as detected_modules_dir,
+    projects_dir,
+    variables_file,
+)
 from core.searcher import search_text
 from core.variables import load_variables
 
@@ -25,6 +38,12 @@ MCP_HOST = os.getenv("MCP_HOST", "127.0.0.1").strip() or "127.0.0.1"
 MCP_PORT = int(os.getenv("MCP_PORT", "8000"))
 MCP_SSE_PATH = os.getenv("MCP_SSE_PATH", "/sse").strip() or "/sse"
 MCP_STREAMABLE_HTTP_PATH = os.getenv("MCP_STREAMABLE_HTTP_PATH", "/mcp").strip() or "/mcp"
+MCP_ENABLE_RESOURCES = os.getenv("MCP_ENABLE_RESOURCES", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 mcp = FastMCP(
     "MCP Rocketbot",
@@ -40,7 +59,7 @@ def _project_root(project_name: str | None = None) -> Path:
     base = projects_dir()
     if not project_name:
         return base
-    target = (base / project_name).resolve()
+    target = ensure_within(base, base / project_name)
     if not target.exists() or not target.is_dir():
         raise FileNotFoundError(f"Proyecto no encontrado: {project_name}")
     return target
@@ -49,6 +68,11 @@ def _project_root(project_name: str | None = None) -> Path:
 @mcp.tool(description="Devuelve rutas clave detectadas para Rocketbot.")
 def get_rocketbot_paths() -> dict[str, str]:
     return describe_paths()
+
+
+@mcp.tool(description="Comprueba si las rutas Rocketbot existen y si vienen del archivo .env.")
+def get_rocketbot_status() -> dict[str, dict[str, object]]:
+    return describe_paths_status()
 
 
 @mcp.tool(description="Lista proyectos o carpetas dentro del directorio de proyectos de Rocketbot.")
@@ -154,8 +178,8 @@ def get_rocketbot_variables(
     description=(
         "Crea un archivo .db SQLite compatible con Rocketbot en formato normal. "
         "Acepta una definición JSON con bot principal, HUs/subrobots, variables, comandos "
-        "y lógica nativa if/for/try_catch/finally/break/continue. "
-        "Antes de usar módulos externos, consulta scan_rocketbot_modules_catalog y usa "
+        "y lógica nativa if/for/while/try_catch/break/group. "
+        "Antes de usar módulos externos, consulta search_rocketbot_module_commands y usa "
         "los nombres y parámetros reales del package.json."
     )
 )
@@ -169,12 +193,37 @@ def create_rocketbot_db_file(
         )
     ),
     overwrite: bool = Field(default=False, description="Sobrescribe si el archivo ya existe"),
+    validate_modules: bool = Field(
+        default=True,
+        description="Valida eventos y parámetros contra package.json antes de crear",
+    ),
+    modules_dir: str | None = Field(
+        default=None,
+        description="Ruta opcional de modules para validación",
+    ),
 ) -> dict[str, object]:
-    return create_rocketbot_db(
+    validation: dict[str, Any] | None = None
+    if validate_modules:
+        target_modules = (
+            Path(modules_dir).expanduser().resolve()
+            if isinstance(modules_dir, str) and modules_dir.strip()
+            else detected_modules_dir()
+        )
+        validation = validate_rocketbot_modules(
+            definition_json=definition_json,
+            modules_dir=str(target_modules),
+        )
+        if not validation["valid"]:
+            raise ValueError("; ".join(validation["errors"]))
+
+    result = create_rocketbot_db(
         output_path=output_path,
         definition_json=definition_json,
         overwrite=overwrite,
     )
+    if validation is not None:
+        result["module_validation"] = validation
+    return result
 
 
 @mcp.tool(
@@ -252,6 +301,61 @@ def scan_rocketbot_modules_catalog(
     return scan_rocketbot_modules(str(target))
 
 
+@mcp.tool(
+    description=(
+        "Busca eventos concretos en package.json sin devolver el catálogo completo. "
+        "Úsala para encontrar el module_name, module y parámetros reales."
+    )
+)
+def search_rocketbot_module_commands(
+    query: str = Field(min_length=1, description="Evento, módulo, título o parámetro"),
+    module_name: str | None = Field(
+        default=None,
+        description="Filtro opcional por nombre de módulo",
+    ),
+    modules_dir: str | None = Field(
+        default=None,
+        description="Ruta opcional de modules; si se omite usa la autodetección",
+    ),
+    limit: int = Field(default=20, ge=1, le=100),
+) -> dict[str, object]:
+    target = (
+        Path(modules_dir).expanduser().resolve()
+        if isinstance(modules_dir, str) and modules_dir.strip()
+        else detected_modules_dir()
+    )
+    return search_rocketbot_modules(
+        modules_dir=str(target),
+        query=query,
+        module_name=module_name,
+        limit=limit,
+    )
+
+
+@mcp.tool(
+    description=(
+        "Valida los comandos de módulos de una definición antes de crear la DB. "
+        "Detecta eventos inexistentes y parámetros requeridos faltantes."
+    )
+)
+def validate_rocketbot_definition(
+    definition_json: Any = Field(description="Definición JSON del flujo Rocketbot"),
+    modules_dir: str | None = Field(
+        default=None,
+        description="Ruta opcional de modules; si se omite usa la autodetección",
+    ),
+) -> dict[str, object]:
+    target = (
+        Path(modules_dir).expanduser().resolve()
+        if isinstance(modules_dir, str) and modules_dir.strip()
+        else detected_modules_dir()
+    )
+    return validate_rocketbot_modules(
+        definition_json=definition_json,
+        modules_dir=str(target),
+    )
+
+
 @mcp.tool(description="Exporta catálogo de módulos Rocketbot a JSON.")
 def export_rocketbot_modules_json(
     modules_dir: str | None = Field(
@@ -294,14 +398,14 @@ def export_rocketbot_modules_obsidian(
     )
 
 
-@mcp.resource("rocketbot://paths", mime_type="application/json")
-def rocketbot_paths_resource() -> str:
-    return json.dumps(describe_paths(), ensure_ascii=False, indent=2)
+if MCP_ENABLE_RESOURCES:
+    @mcp.resource("rocketbot://paths", mime_type="application/json")
+    def rocketbot_paths_resource() -> str:
+        return json.dumps(describe_paths(), ensure_ascii=False, indent=2)
 
-
-@mcp.resource("rocketbot://variables", mime_type="application/json")
-def rocketbot_variables_resource() -> str:
-    return json.dumps(load_variables(variables_file()), ensure_ascii=False, indent=2)
+    @mcp.resource("rocketbot://variables", mime_type="application/json")
+    def rocketbot_variables_resource() -> str:
+        return json.dumps(load_variables(variables_file()), ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":

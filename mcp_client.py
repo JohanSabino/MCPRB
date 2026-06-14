@@ -85,8 +85,9 @@ async def main() -> None:
         for resource in resources:
             print(f"- {resource.uri}")
 
-        print("\nrocketbot://paths")
-        print(await client.read_resource("rocketbot://paths"))
+        if any(str(resource.uri) == "rocketbot://paths" for resource in resources):
+            print("\nrocketbot://paths")
+            print(await client.read_resource("rocketbot://paths"))
 
 
 if __name__ == "__main__":

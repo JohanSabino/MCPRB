@@ -15,29 +15,72 @@ Servidor MCP en Python para:
 
 ## Instalación
 
-### Windows PowerShell
+Instala `uv` una sola vez:
 
 ```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -e .
+# Windows
+winget install --id=astral-sh.uv -e
 ```
-
-### Git Bash
 
 ```bash
-py -3.12 -m venv .venv
-source .venv/Scripts/activate
-python -m pip install --upgrade pip
-pip install -e .
+# macOS
+brew install uv
+
+# Linux o macOS sin Homebrew
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-Dependencias del proyecto:
+Para desarrollar o ejecutar esta copia:
 
-- `mcp[cli]>=1.8.0`
-- `pydantic>=2.7.0`
-- `python-dotenv>=1.0.1`
+```powershell
+uv sync
+uv run mcp-rocketbot
+```
+
+## Instalar en agentes
+
+Todos los clientes ejecutan el mismo servidor aislado directamente desde Git:
+
+```text
+uvx --from git+https://github.com/JohanSabino/MCPRB.git mcp-rocketbot
+```
+
+### Codex CLI
+
+```powershell
+codex mcp add rocketbot -- uvx --from git+https://github.com/JohanSabino/MCPRB.git mcp-rocketbot
+codex mcp get rocketbot
+```
+
+### Claude Code
+
+```powershell
+claude mcp add --transport stdio --scope user rocketbot -- uvx --from git+https://github.com/JohanSabino/MCPRB.git mcp-rocketbot
+claude mcp get rocketbot
+```
+
+### OpenCode
+
+Agrega esto a `opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "rocketbot": {
+        "type": "local",
+        "command": [
+          "uvx",
+          "--from",
+          "git+https://github.com/JohanSabino/MCPRB.git",
+          "mcp-rocketbot"
+        ]
+      }
+    }
+  }
+}
+```
 
 ## Configuración
 
@@ -76,7 +119,7 @@ Notas:
 ### Local `stdio`
 
 ```powershell
-.\.venv\Scripts\python.exe mcp_server.py
+uv run mcp-rocketbot
 ```
 
 ### HTTP `streamable-http`
@@ -93,7 +136,8 @@ MCP_STREAMABLE_HTTP_PATH=/mcp
 Ejecutar:
 
 ```powershell
-.\.venv\Scripts\python.exe mcp_server.py
+$env:MCP_TRANSPORT="streamable-http"
+uv run mcp-rocketbot
 ```
 
 Endpoint:
@@ -105,13 +149,13 @@ http://127.0.0.1:8000/mcp
 ### Inspector MCP
 
 ```powershell
-.\.venv\Scripts\mcp.exe dev mcp_server.py
+uv run mcp dev mcp_server.py
 ```
 
 ## Smoke test local
 
 ```powershell
-.\.venv\Scripts\python.exe mcp_client.py
+uv run python mcp_client.py
 ```
 
 Qué hace:
@@ -124,7 +168,7 @@ Qué hace:
 ## Pruebas
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+uv run python -m unittest discover -s tests -v
 ```
 
 ## Consumo

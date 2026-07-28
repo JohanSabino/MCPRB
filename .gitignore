@@ -5,6 +5,10 @@ __pycache__/
 *.pyo
 *.pyd
 *.log
+*.db
+*.exe
+*_extracted/
+tmp_*.json
 dist/
 build/
 *.egg-info/

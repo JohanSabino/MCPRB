@@ -408,6 +408,10 @@ if MCP_ENABLE_RESOURCES:
         return json.dumps(load_variables(variables_file()), ensure_ascii=False, indent=2)
 
 
-if __name__ == "__main__":
+def main() -> None:
     transport = os.getenv("MCP_TRANSPORT", "stdio").strip().lower() or "stdio"
     mcp.run(transport=transport)
+
+
+if __name__ == "__main__":
+    main()

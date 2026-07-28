@@ -1,11 +1,37 @@
-# MCP Rocketbot
+<div align="center">
 
-Servidor MCP en Python para:
+# 🚀 MCP Rocketbot
 
-- inspeccionar instalaciones y proyectos Rocketbot
-- leer logs y variables
-- crear y exportar archivos `.db`
-- documentar bots y módulos en Obsidian
+**Conecta agentes de IA con proyectos, logs, variables, módulos y bases de datos de Rocketbot Studio.**
+
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![MCP](https://img.shields.io/badge/Protocol-MCP-7C3AED)](https://modelcontextprotocol.io/)
+[![Rocketbot](https://img.shields.io/badge/Rocketbot-Studio-EA1D2C)](https://rocketbot.com/)
+[![Platforms](https://img.shields.io/badge/OS-Windows%20%7C%20macOS%20%7C%20Linux-0A7EA4)](#instalación)
+[![Tests](https://img.shields.io/badge/tests-13%20passing-2EA44F)](#pruebas)
+
+[Instalación](#instalación) · [Agentes compatibles](#instalar-en-agentes) · [Tools](#catálogo-de-tools) · [Seguridad](#seguridad)
+
+</div>
+
+---
+
+## ✨ Qué permite hacer
+
+| 🔎 Inspección | 🧾 Diagnóstico | 🧱 Construcción | 📚 Documentación |
+|---|---|---|---|
+| Explorar proyectos y archivos | Analizar logs y variables | Crear bases `.db` Rocketbot | Exportar flujos a Obsidian |
+| Buscar texto en proyectos | Verificar rutas detectadas | Validar módulos y parámetros | Generar catálogos JSON/Markdown |
+
+```mermaid
+flowchart LR
+    A["Codex · Claude Code · OpenCode"] -->|MCP stdio| B["MCP Rocketbot"]
+    B --> C["Proyectos"]
+    B --> D["Logs y variables"]
+    B --> E["Bases .db"]
+    B --> F["Módulos"]
+    E --> G["JSON · Obsidian"]
+```
 
 ## Requisitos
 
@@ -469,26 +495,28 @@ Tool: `export_rocketbot_db_obsidian`
 }
 ```
 
-## Tools disponibles
+## 🧰 Catálogo de tools
 
-- `get_rocketbot_paths`
-- `get_rocketbot_status`
-- `list_projects`
-- `list_project_files`
-- `read_project_file`
-- `search_in_project`
-- `list_rocketbot_logs`
-- `read_rocketbot_log`
-- `get_rocketbot_variables`
-- `create_rocketbot_db_file`
-- `create_rocketbot_db_from_object`
-- `export_rocketbot_db_json`
-- `export_rocketbot_db_obsidian`
-- `scan_rocketbot_modules_catalog`
-- `search_rocketbot_module_commands`
-- `validate_rocketbot_definition`
-- `export_rocketbot_modules_json`
-- `export_rocketbot_modules_obsidian`
+| Área | Tool | Descripción |
+|---|---|---|
+| 🧭 Entorno | `get_rocketbot_paths` | Devuelve las rutas de Rocketbot detectadas o configuradas. |
+| 🧭 Entorno | `get_rocketbot_status` | Comprueba si las rutas existen y si provienen del archivo `.env`. |
+| 📂 Proyectos | `list_projects` | Lista las carpetas de proyectos disponibles en Rocketbot. |
+| 📂 Proyectos | `list_project_files` | Enumera los archivos contenidos en un proyecto. |
+| 📂 Proyectos | `read_project_file` | Lee de forma segura un archivo usando una ruta relativa al proyecto. |
+| 🔎 Búsqueda | `search_in_project` | Busca texto dentro de los archivos de un proyecto. |
+| 🧾 Logs | `list_rocketbot_logs` | Lista logs desde una ruta indicada o desde la ubicación detectada. |
+| 🧾 Logs | `read_rocketbot_log` | Lee las últimas líneas de un log concreto o del más reciente. |
+| 🔐 Variables | `get_rocketbot_variables` | Carga variables desde archivos JSON, INI, ENV o TXT. |
+| 🧱 Bases DB | `create_rocketbot_db_file` | Construye una `.db` desde una definición JSON simplificada. |
+| 🧱 Bases DB | `create_rocketbot_db_from_object` | Persiste una lista de bots con estructura Rocketbot ya compilada. |
+| 📤 Exportación | `export_rocketbot_db_json` | Convierte una `.db` en JSON editable para análisis y verificación. |
+| 📚 Documentación | `export_rocketbot_db_obsidian` | Genera notas, índices y diagramas Markdown para Obsidian. |
+| 🧩 Módulos | `scan_rocketbot_modules_catalog` | Escanea `package.json` y cataloga comandos y parámetros de módulos. |
+| 🧩 Módulos | `search_rocketbot_module_commands` | Busca eventos concretos sin devolver el catálogo completo. |
+| ✅ Validación | `validate_rocketbot_definition` | Detecta módulos inexistentes y parámetros obligatorios faltantes. |
+| 📤 Exportación | `export_rocketbot_modules_json` | Exporta el catálogo de módulos a un archivo JSON. |
+| 📚 Documentación | `export_rocketbot_modules_obsidian` | Exporta el catálogo de módulos como notas Markdown. |
 
 ## Resources
 

@@ -20,6 +20,7 @@ from core.module_catalog import (
 )
 from core.module_validation import validate_rocketbot_modules
 from core.obsidian_exporter import export_rocketbot_db_to_obsidian
+from core.python_project_builder import generate_rocketbot_python_project, plan_rocketbot_python_project
 from core.paths import (
     describe_paths,
     describe_paths_status,
@@ -260,6 +261,38 @@ def export_rocketbot_db_json(
         db_path=db_path,
         output_json_path=output_json_path,
         include_raw_data=include_raw_data,
+    )
+
+
+@mcp.tool(description="Planifica la conversión de una DB Rocketbot a un proyecto Python tipo Makro; no escribe archivos y requiere aprobación posterior.")
+def plan_rocketbot_python_conversion(
+    db_path: str = Field(description="Ruta de la DB Rocketbot fuente"),
+    output_dir: str = Field(description="Carpeta propuesta para el proyecto Python"),
+    template: str = Field(default="makro", description="Estructura objetivo; por ahora makro"),
+) -> dict[str, object]:
+    return plan_rocketbot_python_project(
+        db_path=db_path,
+        output_dir=output_dir,
+        template=template,
+    )
+
+
+@mcp.tool(description="Genera el proyecto Python planificado; exige plan_id vigente y approve=true después de validar el plan.")
+def generate_rocketbot_python_conversion(
+    db_path: str = Field(description="Ruta de la DB Rocketbot fuente"),
+    output_dir: str = Field(description="Carpeta destino del proyecto Python"),
+    plan_id: str = Field(description="plan_id devuelto por plan_rocketbot_python_conversion"),
+    approve: bool = Field(default=False, description="Aprobación explícita del plan revisado"),
+    template: str = Field(default="makro", description="Estructura objetivo; por ahora makro"),
+    overwrite: bool = Field(default=False, description="Permite generar sobre una carpeta no vacía"),
+) -> dict[str, object]:
+    return generate_rocketbot_python_project(
+        db_path=db_path,
+        output_dir=output_dir,
+        plan_id=plan_id,
+        approve=approve,
+        template=template,
+        overwrite=overwrite,
     )
 
 

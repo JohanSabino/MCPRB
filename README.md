@@ -495,10 +495,58 @@ Tool: `export_rocketbot_db_obsidian`
 }
 ```
 
+## Conversión prioritaria: Rocketbot → Python
+
+Estas tools convierten una DB Rocketbot a un proyecto Python con estructura
+tipo Makro: `main.py`, `HU/`, `Funciones/`, `config/config.xlsx`, `Inputs/`,
+`Outputs/`, `Plantillas/`, `Logs/`, `Temp/`, `tests/` y `docs/`.
+
+El flujo requiere revisión antes de generar archivos:
+
+1. `plan_rocketbot_python_conversion` analiza la DB, identifica bots/HU,
+   propone funciones y archivos, detecta duplicados y posibles secretos, y
+   devuelve un `plan_id`. No crea archivos.
+2. `generate_rocketbot_python_conversion` recibe el mismo `plan_id` con
+   `approve: true` y genera el proyecto solo después de validar la propuesta.
+
+Planificar:
+
+```json
+{
+  "db_path": "C:/temp/robot.db",
+  "output_dir": "C:/temp/robot_python",
+  "template": "makro"
+}
+```
+
+Generar después de revisar:
+
+```json
+{
+  "db_path": "C:/temp/robot.db",
+  "output_dir": "C:/temp/robot_python",
+  "plan_id": "devuelto_por_la_tool_anterior",
+  "approve": true,
+  "template": "makro",
+  "overwrite": false
+}
+```
+
+La generación no copia comandos raw ni valores que parezcan secretos. Las
+acciones que dependen del entorno, como SAP GUI, quedan marcadas para
+adaptación manual.
+
+Para optimizar proyectos Python grandes, se recomienda evaluar
+[DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)
+para indexar el código, buscar símbolos, rastrear dependencias y analizar
+impactos. Es opcional y no es una dependencia de ejecución de este MCP.
+
 ## 🧰 Catálogo de tools
 
 | Área | Tool | Descripción |
 |---|---|---|
+| 🐍 Conversión | `plan_rocketbot_python_conversion` | Propone la estructura Python y devuelve un `plan_id` sin crear archivos. |
+| 🐍 Conversión | `generate_rocketbot_python_conversion` | Genera la estructura aprobada usando un `plan_id` vigente. |
 | 🧭 Entorno | `get_rocketbot_paths` | Devuelve las rutas de Rocketbot detectadas o configuradas. |
 | 🧭 Entorno | `get_rocketbot_status` | Comprueba si las rutas existen y si provienen del archivo `.env`. |
 | 📂 Proyectos | `list_projects` | Lista las carpetas de proyectos disponibles en Rocketbot. |

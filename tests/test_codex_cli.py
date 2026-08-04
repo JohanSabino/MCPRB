@@ -10,7 +10,13 @@ class CodexCliTest(unittest.TestCase):
         command = build_add_command()
 
         self.assertEqual(command[:6], ["codex.cmd", "mcp", "add", "rocketbot", "--", "uvx"])
-        self.assertEqual(command[-2:], ["git+https://github.com/JohanSabino/MCPRB.git", "mcp-rocketbot"])
+        self.assertEqual(
+            command[-2:],
+            [
+                "https://github.com/JohanSabino/MCPRB/archive/refs/heads/main.zip",
+                "mcp-rocketbot",
+            ],
+        )
 
     def test_update_removes_and_readds_with_refresh(self) -> None:
         calls: list[tuple[list[str], dict[str, object]]] = []

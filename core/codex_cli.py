@@ -7,7 +7,7 @@ import os
 import subprocess
 from collections.abc import Callable, Sequence
 
-DEFAULT_REPOSITORY = "https://github.com/JohanSabino/MCPRB.git"
+DEFAULT_REPOSITORY = "https://github.com/JohanSabino/MCPRB/archive/refs/heads/main.zip"
 DEFAULT_SERVER_NAME = "rocketbot"
 PACKAGE_NAME = "mcp-rocketbot"
 Runner = Callable[..., subprocess.CompletedProcess[object]]
@@ -17,8 +17,10 @@ def _codex_command() -> str:
     return "codex.cmd" if os.name == "nt" else "codex"
 
 
-def _git_source(repository: str) -> str:
-    return repository if repository.startswith("git+") else f"git+{repository}"
+def _package_source(repository: str) -> str:
+    if repository.startswith("git+") or repository.lower().endswith((".zip", ".tar.gz", ".tgz")):
+        return repository
+    return f"git+{repository}"
 
 
 def build_add_command(
@@ -30,7 +32,7 @@ def build_add_command(
     command = [_codex_command(), "mcp", "add", server_name, "--", "uvx"]
     if refresh:
         command.append("--refresh")
-    command.extend(["--from", _git_source(repository), PACKAGE_NAME])
+    command.extend(["--from", _package_source(repository), PACKAGE_NAME])
     return command
 
 

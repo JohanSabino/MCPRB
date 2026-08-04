@@ -65,16 +65,16 @@ uv run mcp-rocketbot
 
 ## Instalar en agentes
 
-Todos los clientes ejecutan el mismo servidor aislado directamente desde Git:
+Todos los clientes ejecutan el mismo servidor aislado directamente desde GitHub:
 
 ```text
-uvx --from git+https://github.com/JohanSabino/MCPRB.git mcp-rocketbot
+uvx --from https://github.com/JohanSabino/MCPRB/archive/refs/heads/main.zip mcp-rocketbot
 ```
 
 ### Codex CLI
 
 ```powershell
-codex mcp add rocketbot -- uvx --from git+https://github.com/JohanSabino/MCPRB.git mcp-rocketbot
+codex mcp add rocketbot -- uvx --from https://github.com/JohanSabino/MCPRB/archive/refs/heads/main.zip mcp-rocketbot
 codex mcp get rocketbot
 ```
 
@@ -82,16 +82,16 @@ Atajos de una sola línea:
 
 ```powershell
 # Instalar y registrar el MCP con sus dependencias
-uvx --from git+https://github.com/JohanSabino/MCPRB.git mcp-rocketbot install
+uvx --from https://github.com/JohanSabino/MCPRB/archive/refs/heads/main.zip mcp-rocketbot install
 
 # Actualizar desde main y refrescar la caché
-uvx --refresh --from git+https://github.com/JohanSabino/MCPRB.git mcp-rocketbot update
+uvx --refresh --from https://github.com/JohanSabino/MCPRB/archive/refs/heads/main.zip mcp-rocketbot update
 
 # Desinstalar el registro y limpiar la caché específica del paquete
-uvx --from git+https://github.com/JohanSabino/MCPRB.git mcp-rocketbot uninstall
+uvx --from https://github.com/JohanSabino/MCPRB/archive/refs/heads/main.zip mcp-rocketbot uninstall
 
 # Desinstalar solo el registro y conservar la caché
-uvx --from git+https://github.com/JohanSabino/MCPRB.git mcp-rocketbot uninstall --keep-cache
+uvx --from https://github.com/JohanSabino/MCPRB/archive/refs/heads/main.zip mcp-rocketbot uninstall --keep-cache
 ```
 
 `install` y `update` registran `rocketbot` en Codex CLI. `uninstall` no borra la
@@ -101,7 +101,7 @@ de este paquete. Después de cada comando, reinicia Codex o recarga los MCP.
 ### Claude Code
 
 ```powershell
-claude mcp add --transport stdio --scope user rocketbot -- uvx --from git+https://github.com/JohanSabino/MCPRB.git mcp-rocketbot
+claude mcp add --transport stdio --scope user rocketbot -- uvx --from https://github.com/JohanSabino/MCPRB/archive/refs/heads/main.zip mcp-rocketbot
 claude mcp get rocketbot
 ```
 
@@ -119,7 +119,7 @@ Agrega esto a `opencode.json`:
         "command": [
           "uvx",
           "--from",
-          "git+https://github.com/JohanSabino/MCPRB.git",
+          "https://github.com/JohanSabino/MCPRB/archive/refs/heads/main.zip",
           "mcp-rocketbot"
         ]
       }

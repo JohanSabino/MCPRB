@@ -78,6 +78,24 @@ codex mcp add rocketbot -- uvx --from https://github.com/JohanSabino/MCPRB/archi
 codex mcp get rocketbot
 ```
 
+Al instalar o actualizar, la herramienta también registra estas variables en
+la configuración de Codex. Las rutas `ROCKETBOT_*` quedan vacías para que cada
+usuario las complete; las variables `MCP_*` usan estos valores predeterminados:
+
+```env
+ROCKETBOT_HOME=
+ROCKETBOT_PROJECTS_DIR=
+ROCKETBOT_LOGS_DIR=
+ROCKETBOT_MODULES_DIR=
+ROCKETBOT_VARIABLES_FILE=
+MCP_TRANSPORT=stdio
+MCP_HOST=127.0.0.1
+MCP_PORT=8000
+MCP_SSE_PATH=/sse
+MCP_STREAMABLE_HTTP_PATH=/mcp
+MCP_ENABLE_RESOURCES=false
+```
+
 Atajos de una sola línea:
 
 ```powershell

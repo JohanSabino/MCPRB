@@ -2,14 +2,20 @@ from __future__ import annotations
 
 import unittest
 
-from core.codex_cli import build_add_command, configure_codex
+from core.codex_cli import DEFAULT_ENVIRONMENT, build_add_command, configure_codex
 
 
 class CodexCliTest(unittest.TestCase):
     def test_build_add_command_uses_main_repository(self) -> None:
         command = build_add_command()
 
-        self.assertEqual(command[:6], ["codex.cmd", "mcp", "add", "rocketbot", "--", "uvx"])
+        self.assertEqual(command[:4], ["codex.cmd", "mcp", "add", "rocketbot"])
+        self.assertEqual(
+            command[4:26:2],
+            ["--env"] * len(DEFAULT_ENVIRONMENT),
+        )
+        self.assertEqual(command[5:26:2], list(DEFAULT_ENVIRONMENT))
+        self.assertEqual(command[26:28], ["--", "uvx"])
         self.assertEqual(
             command[-2:],
             [

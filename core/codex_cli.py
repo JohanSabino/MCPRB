@@ -10,6 +10,19 @@ from collections.abc import Callable, Sequence
 DEFAULT_REPOSITORY = "https://github.com/JohanSabino/MCPRB/archive/refs/heads/main.zip"
 DEFAULT_SERVER_NAME = "rocketbot"
 PACKAGE_NAME = "mcp-rocketbot"
+DEFAULT_ENVIRONMENT = (
+    "ROCKETBOT_HOME=",
+    "ROCKETBOT_PROJECTS_DIR=",
+    "ROCKETBOT_LOGS_DIR=",
+    "ROCKETBOT_MODULES_DIR=",
+    "ROCKETBOT_VARIABLES_FILE=",
+    "MCP_TRANSPORT=stdio",
+    "MCP_HOST=127.0.0.1",
+    "MCP_PORT=8000",
+    "MCP_SSE_PATH=/sse",
+    "MCP_STREAMABLE_HTTP_PATH=/mcp",
+    "MCP_ENABLE_RESOURCES=false",
+)
 Runner = Callable[..., subprocess.CompletedProcess[object]]
 
 
@@ -29,7 +42,10 @@ def build_add_command(
     *,
     refresh: bool = False,
 ) -> list[str]:
-    command = [_codex_command(), "mcp", "add", server_name, "--", "uvx"]
+    command = [_codex_command(), "mcp", "add", server_name]
+    for variable in DEFAULT_ENVIRONMENT:
+        command.extend(["--env", variable])
+    command.extend(["--", "uvx"])
     if refresh:
         command.append("--refresh")
     command.extend(["--from", _package_source(repository), PACKAGE_NAME])

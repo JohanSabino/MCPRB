@@ -89,6 +89,9 @@ uvx --refresh --from git+https://github.com/JohanSabino/MCPRB.git mcp-rocketbot 
 
 # Desinstalar el registro y limpiar la caché específica del paquete
 uvx --from git+https://github.com/JohanSabino/MCPRB.git mcp-rocketbot uninstall
+
+# Desinstalar solo el registro y conservar la caché
+uvx --from git+https://github.com/JohanSabino/MCPRB.git mcp-rocketbot uninstall --keep-cache
 ```
 
 `install` y `update` registran `rocketbot` en Codex CLI. `uninstall` no borra la

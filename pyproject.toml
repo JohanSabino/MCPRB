@@ -5,7 +5,7 @@ description = "MCP para inspección de proyectos, logs y variables de Rocketbot 
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "mcp[cli]>=1.8.0",
+    "mcp[cli]>=1.8.0,<2",
     "pydantic>=2.7.0",
     "python-dotenv>=1.0.1",
 ]

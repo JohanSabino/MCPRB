@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 import zipfile
+import sqlite3
 from pathlib import Path
 
 from core.db_builder import create_rocketbot_db
@@ -38,6 +39,32 @@ class PythonProjectBuilderTest(unittest.TestCase):
             )
             self.assertGreater(result["files_created"], 0)
             self.assertTrue(zipfile.is_zipfile(root / "out" / "config" / "config.xlsx"))
+
+    def test_generation_normalizes_blocked_data_type_after_approval(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            db_path = root / "source.db"
+            create_rocketbot_db(
+                str(db_path),
+                {"bots": [{"name": "main", "project": {"project": {"commands": []}}}]},
+            )
+            connection = sqlite3.connect(db_path)
+            try:
+                connection.execute("UPDATE bots SET data_type = ''")
+                connection.commit()
+            finally:
+                connection.close()
+
+            plan = plan_rocketbot_python_project(str(db_path), str(root / "out"))
+            self.assertTrue(plan["database_status"]["requires_normalization"])
+            result = generate_rocketbot_python_project(
+                str(db_path), str(root / "out"), plan["plan_id"], approve=True
+            )
+
+            normalization = result["normalization"]
+            self.assertTrue(normalization["created_copy"])
+            self.assertTrue(Path(normalization["normalized_db"]).exists())
+            self.assertEqual(result["approval_plan_id"], plan["plan_id"])
 
 
 if __name__ == "__main__":

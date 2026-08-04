@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shutil
 import sqlite3
 import tempfile
 from dataclasses import dataclass
@@ -87,6 +88,117 @@ def _encode_normal_payload(project: dict[str, Any]) -> str:
 def _decode_normal_payload(data: str) -> dict[str, Any]:
     decoded = base64.b64decode(data.encode("ascii"))
     return json.loads(decoded.decode("utf-8"))
+
+
+def inspect_rocketbot_db(db_path: str) -> dict[str, Any]:
+    """Inspecciona legibilidad y posibles bloqueos de ``data_type`` sin escribir."""
+    source = Path(db_path).expanduser().resolve()
+    if not source.exists() or not source.is_file():
+        raise FileNotFoundError(f"No existe: {source}")
+
+    connection = sqlite3.connect(source)
+    try:
+        rows = connection.execute(
+            "SELECT id, name, data, data_type FROM bots ORDER BY id"
+        ).fetchall()
+    finally:
+        connection.close()
+
+    decoded_rows = 0
+    normalizable_rows: list[dict[str, Any]] = []
+    unreadable_rows: list[dict[str, Any]] = []
+    normal_rows = 0
+    non_normal_rows = 0
+
+    for bot_id, name, data, data_type in rows:
+        current_type = str(data_type or "")
+        if current_type == "normal":
+            normal_rows += 1
+        else:
+            non_normal_rows += 1
+
+        try:
+            _decode_normal_payload(data or "")
+        except Exception:
+            unreadable_rows.append({
+                "id": bot_id,
+                "name": name or "",
+                "data_type": current_type,
+            })
+            continue
+
+        decoded_rows += 1
+        if current_type != "normal":
+            normalizable_rows.append({
+                "id": bot_id,
+                "name": name or "",
+                "data_type": current_type,
+            })
+
+    normalized_path = source.with_name(f"{source.stem}_NORMALIZADA{source.suffix}")
+    return {
+        "source_db": str(source),
+        "total_rows": len(rows),
+        "normal_rows": normal_rows,
+        "non_normal_rows": non_normal_rows,
+        "decoded_rows": decoded_rows,
+        "normalizable_rows": normalizable_rows,
+        "normalization_rows": non_normal_rows,
+        "unreadable_rows": unreadable_rows,
+        "readable": not unreadable_rows,
+        "requires_normalization": bool(non_normal_rows),
+        "can_normalize": bool(non_normal_rows) and not unreadable_rows,
+        "recommended_normalized_path": str(normalized_path),
+    }
+
+
+def normalize_rocketbot_db_copy(
+    db_path: str,
+    output_path: str | None = None,
+) -> dict[str, Any]:
+    """Crea una copia legible y nunca modifica la DB original."""
+    source = Path(db_path).expanduser().resolve()
+    inspection = inspect_rocketbot_db(str(source))
+    if not inspection["requires_normalization"]:
+        return {
+            "source_db": str(source),
+            "normalized_db": str(source),
+            "rows_normalized": 0,
+            "created_copy": False,
+        }
+    if not inspection["can_normalize"]:
+        raise ValueError(
+            "La DB tiene filas que no pueden decodificarse; no se puede normalizar "
+            "de forma segura. Revise database_status.unreadable_rows."
+        )
+
+    destination = (
+        Path(output_path).expanduser().resolve()
+        if output_path
+        else Path(inspection["recommended_normalized_path"])
+    )
+    if destination == source:
+        raise ValueError("La copia normalizada debe tener una ruta distinta a la DB original")
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+    ids = [row["id"] for row in inspection["normalizable_rows"]]
+    connection = sqlite3.connect(destination)
+    try:
+        connection.executemany(
+            "UPDATE bots SET data_type = 'normal' WHERE id = ?",
+            [(bot_id,) for bot_id in ids],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    return {
+        "source_db": str(source),
+        "normalized_db": str(destination),
+        "rows_normalized": len(ids),
+        "created_copy": True,
+    }
 
 
 def parse_db_definition(definition_json: str | dict[str, Any] | list[Any]) -> list[BotDefinition]:
@@ -948,6 +1060,7 @@ def export_rocketbot_db(
     db_path: str,
     output_json_path: str | None = None,
     include_raw_data: bool = False,
+    normalize_data_type: bool = False,
 ) -> dict[str, Any]:
     source = Path(db_path).expanduser().resolve()
     if not source.exists():
@@ -980,9 +1093,12 @@ def export_rocketbot_db(
             "father": father or "",
         }
 
-        if (data_type or "") == "normal":
+        should_decode = (data_type or "") == "normal" or normalize_data_type
+        if should_decode:
             try:
                 item["project"] = _decode_normal_payload(data or "")
+                if (data_type or "") != "normal":
+                    item["data_type_normalized_for_read"] = True
             except Exception as exc:
                 item["project_decode_error"] = str(exc)
                 if include_raw_data:

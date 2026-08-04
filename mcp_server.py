@@ -286,6 +286,10 @@ def generate_rocketbot_python_conversion(
     plan_id: str = Field(description="plan_id devuelto por plan_rocketbot_python_conversion"),
     approve: bool = Field(default=False, description="Aprobación explícita del plan revisado"),
     template: str = Field(default="makro", description="Estructura objetivo; por ahora makro"),
+    normalize_db: bool = Field(
+        default=True,
+        description="Crea una copia *_NORMALIZADA.db si data_type bloquea la lectura",
+    ),
     overwrite: bool = Field(default=False, description="Permite generar sobre una carpeta no vacía"),
 ) -> dict[str, object]:
     return generate_rocketbot_python_project(
@@ -295,6 +299,7 @@ def generate_rocketbot_python_conversion(
         approve=approve,
         template=template,
         overwrite=overwrite,
+        normalize_db=normalize_db,
     )
 
 

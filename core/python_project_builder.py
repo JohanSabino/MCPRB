@@ -9,7 +9,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from core.db_builder import export_rocketbot_db
+from core.db_builder import (
+    export_rocketbot_db,
+    inspect_rocketbot_db,
+    normalize_rocketbot_db_copy,
+)
 
 
 PLAN_VERSION = "1"
@@ -52,6 +56,7 @@ def _bot_summary(bot: dict[str, Any]) -> dict[str, Any]:
     project = bot.get("project") or {}
     root = project.get("project", {}) if isinstance(project, dict) else {}
     commands = list(_walk_commands(root.get("commands", [])))
+    variables = root.get("vars", [])
     modules: set[str] = set()
     fathers: set[str] = set()
     sensitive = False
@@ -77,6 +82,7 @@ def _bot_summary(bot: dict[str, Any]) -> dict[str, Any]:
         "created_at": bot.get("created_at", ""),
         "description": bot.get("description", ""),
         "commands": len(commands),
+        "variables": len(variables) if isinstance(variables, list) else 0,
         "modules": sorted(modules),
         "command_types": sorted(fathers),
         "contains_sensitive_fields": sensitive,
@@ -152,7 +158,16 @@ def _build_plan(db_path: str, output_dir: str, template: str) -> dict[str, Any]:
     if template != "makro":
         raise ValueError("Por ahora solo está disponible template='makro'")
 
-    exported = export_rocketbot_db(str(source), include_raw_data=False)
+    database_status = inspect_rocketbot_db(str(source))
+    preview_normalized = (
+        database_status["requires_normalization"]
+        and database_status["can_normalize"]
+    )
+    exported = export_rocketbot_db(
+        str(source),
+        include_raw_data=False,
+        normalize_data_type=preview_normalized,
+    )
     bots = _latest_bots(exported)
     summaries = [_bot_summary(bot) for bot in bots]
     main_bot = next((item for item in summaries if item["name"] == "main"), None)
@@ -177,6 +192,14 @@ def _build_plan(db_path: str, output_dir: str, template: str) -> dict[str, Any]:
         }
         for item in function_bots
     ]
+    module_names = sorted({module for item in summaries for module in item["modules"]})
+    inventory = {
+        "commands": sum(item["commands"] for item in summaries),
+        "variables": sum(item["variables"] for item in summaries),
+        "modules": module_names,
+        "module_count": len(module_names),
+        "adapter_candidates": module_names,
+    }
     structure = [
         {"path": "main.py", "purpose": "Orquestador principal Python."},
         *hu_files,
@@ -201,6 +224,26 @@ def _build_plan(db_path: str, output_dir: str, template: str) -> dict[str, Any]:
     ]
     if any(item["contains_sensitive_fields"] for item in summaries):
         warnings.append("La DB contiene campos sensibles; fueron omitidos del plan y del proyecto generado.")
+    if database_status["requires_normalization"]:
+        if database_status["can_normalize"]:
+            warnings.append(
+                "La DB contiene payloads legibles con data_type distinto de normal; "
+                "la generación creará una copia *_NORMALIZADA.db después de aprobar el plan."
+            )
+        else:
+            warnings.append(
+                "La DB tiene filas con data_type distinto de normal que no pudieron decodificarse; "
+                "la conversión queda bloqueada hasta revisar esas filas."
+            )
+
+    if (
+        database_status["unreadable_rows"]
+        and not database_status["requires_normalization"]
+    ):
+        warnings.append(
+            "La DB tiene payloads que no pudieron decodificarse; la conversion queda "
+            "bloqueada hasta revisar esas filas."
+        )
 
     canonical = {
         "version": PLAN_VERSION,
@@ -216,7 +259,12 @@ def _build_plan(db_path: str, output_dir: str, template: str) -> dict[str, Any]:
     ).hexdigest()[:16]
     return {
         "plan_id": plan_id,
-        "status": "awaiting_approval",
+        "status": (
+            "blocked_db"
+            if database_status["unreadable_rows"]
+            and not database_status["can_normalize"]
+            else "awaiting_approval"
+        ),
         "template": template,
         "source_db": str(source),
         "output_dir": str(Path(output_dir).expanduser().resolve()),
@@ -226,6 +274,8 @@ def _build_plan(db_path: str, output_dir: str, template: str) -> dict[str, Any]:
         "proposed_functions": function_files,
         "config_fields_count": len(config_fields),
         "config_fields_preview": config_fields[:25],
+        "database_status": database_status,
+        "inventory": inventory,
         "proposed_structure": structure,
         "warnings": warnings,
         "approval_required": True,
@@ -370,7 +420,16 @@ def build_context():
                 str((plan.get("main_bot") or {}).get("name", "")),
             )
             _write_xlsx_placeholder(path, fields)
-    return {"output_dir": str(root), "files_created": len(plan["proposed_structure"]), "plan_id": plan["plan_id"]}
+    result = {
+        "output_dir": str(root),
+        "files_created": len(plan["proposed_structure"]),
+        "plan_id": plan["plan_id"],
+    }
+    if "approval_plan_id" in plan:
+        result["approval_plan_id"] = plan["approval_plan_id"]
+    if "normalization" in plan:
+        result["normalization"] = plan["normalization"]
+    return result
 
 
 def generate_rocketbot_python_project(
@@ -380,6 +439,7 @@ def generate_rocketbot_python_project(
     approve: bool = False,
     template: str = "makro",
     overwrite: bool = False,
+    normalize_db: bool = True,
 ) -> dict[str, Any]:
     """Genera solo después de aprobación explícita y validación del plan."""
     if not approve:
@@ -387,6 +447,21 @@ def generate_rocketbot_python_project(
     plan = _build_plan(db_path, output_dir, template)
     if plan["plan_id"] != plan_id:
         raise ValueError("El plan_id no coincide; la DB, salida o estructura cambió")
+    if plan["database_status"]["requires_normalization"]:
+        if not normalize_db:
+            raise PermissionError(
+                "La DB requiere normalizacion; use normalize_db=true para crear "
+                "una copia *_NORMALIZADA.db sin modificar la original"
+            )
+        normalized = normalize_rocketbot_db_copy(plan["source_db"])
+        generated_plan = _build_plan(normalized["normalized_db"], output_dir, template)
+        generated_plan["approval_plan_id"] = plan_id
+        generated_plan["source_db_original"] = plan["source_db"]
+        generated_plan["normalization"] = normalized
+        generated_plan["plan_id"] = plan_id
+        plan = generated_plan
+    else:
+        plan["approval_plan_id"] = plan_id
     root = Path(plan["output_dir"])
     if root.exists() and any(root.iterdir()) and not overwrite:
         raise FileExistsError(f"La carpeta no está vacía: {root}; use overwrite=true si corresponde")

@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 
-from core.db_builder import compile_definition_to_bots, create_rocketbot_db, export_rocketbot_db
+from core.db_builder import (
+    compile_definition_to_bots,
+    create_rocketbot_db,
+    export_rocketbot_db,
+    inspect_rocketbot_db,
+    normalize_rocketbot_db_copy,
+)
 
 
 def dsl_definition(actions: list[dict[str, object]]) -> dict[str, object]:
@@ -144,6 +151,46 @@ class DBBuilderTests(unittest.TestCase):
             self.assertEqual(result["bots_created"], 2)
             self.assertEqual(exported["bots_count"], 2)
             self.assertEqual(exported["bots"][1]["name"], "HU01")
+
+    def test_normalizes_data_type_on_copy_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.db"
+            create_rocketbot_db(str(source), dsl_definition([]))
+            connection = sqlite3.connect(source)
+            try:
+                connection.execute("UPDATE bots SET data_type = ''")
+                connection.commit()
+            finally:
+                connection.close()
+
+            inspection = inspect_rocketbot_db(str(source))
+            self.assertTrue(inspection["requires_normalization"])
+            self.assertTrue(inspection["can_normalize"])
+            self.assertEqual(inspection["normalization_rows"], 2)
+
+            result = normalize_rocketbot_db_copy(str(source))
+            normalized = Path(result["normalized_db"])
+            self.assertTrue(normalized.exists())
+            self.assertEqual(result["rows_normalized"], 2)
+            self.assertEqual(export_rocketbot_db(str(source))["bots"][0]["data_type"], "")
+            self.assertIsNotNone(export_rocketbot_db(str(normalized))["bots"][0]["project"])
+
+    def test_rejects_unsafe_normalization_when_payload_is_not_decodable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.db"
+            create_rocketbot_db(str(source), dsl_definition([]))
+            connection = sqlite3.connect(source)
+            try:
+                connection.execute("UPDATE bots SET data = 'not-base64', data_type = ''")
+                connection.commit()
+            finally:
+                connection.close()
+
+            inspection = inspect_rocketbot_db(str(source))
+            self.assertTrue(inspection["requires_normalization"])
+            self.assertFalse(inspection["can_normalize"])
+            with self.assertRaisesRegex(ValueError, "no se puede normalizar"):
+                normalize_rocketbot_db_copy(str(source))
 
 
 if __name__ == "__main__":

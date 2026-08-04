@@ -566,9 +566,24 @@ Generar después de revisar:
   "plan_id": "devuelto_por_la_tool_anterior",
   "approve": true,
   "template": "makro",
-  "overwrite": false
+  "overwrite": false,
+  "normalize_db": true
 }
 ```
+
+Si la DB no se puede leer, el plan revisa primero si el bloqueo proviene de
+`data_type` distinto de `normal`. Cuando el payload sigue siendo decodificable,
+la generación aprobada crea una copia `*_NORMALIZADA.db`, cambia ese estado solo
+en la copia y conserva intacta la DB original. El plan informa:
+
+- filas totales, decodificadas y pendientes;
+- filas que pueden normalizarse de forma segura;
+- ruta propuesta de la copia normalizada;
+- inventario de comandos, variables, módulos y candidatos a adaptadores.
+
+La generación usa esta opción por defecto después de `approve: true`. Puede
+desactivarse con `normalize_db: false` si se desea detener la conversión ante
+una DB que requiera normalización.
 
 La generación no copia comandos raw ni valores que parezcan secretos. Las
 acciones que dependen del entorno, como SAP GUI, quedan marcadas para

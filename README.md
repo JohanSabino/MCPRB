@@ -78,6 +78,23 @@ codex mcp add rocketbot -- uvx --from git+https://github.com/JohanSabino/MCPRB.g
 codex mcp get rocketbot
 ```
 
+Atajos de una sola línea:
+
+```powershell
+# Instalar y registrar el MCP con sus dependencias
+uvx --from git+https://github.com/JohanSabino/MCPRB.git mcp-rocketbot install
+
+# Actualizar desde main y refrescar la caché
+uvx --refresh --from git+https://github.com/JohanSabino/MCPRB.git mcp-rocketbot update
+
+# Desinstalar el registro y limpiar la caché específica del paquete
+uvx --from git+https://github.com/JohanSabino/MCPRB.git mcp-rocketbot uninstall
+```
+
+`install` y `update` registran `rocketbot` en Codex CLI. `uninstall` no borra la
+caché global de uv ni otras herramientas; solo elimina el registro y la caché
+de este paquete. Después de cada comando, reinicia Codex o recarga los MCP.
+
 ### Claude Code
 
 ```powershell

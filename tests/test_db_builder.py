@@ -172,7 +172,9 @@ class DBBuilderTests(unittest.TestCase):
             normalized = Path(result["normalized_db"])
             self.assertTrue(normalized.exists())
             self.assertEqual(result["rows_normalized"], 2)
-            self.assertEqual(export_rocketbot_db(str(source))["bots"][0]["data_type"], "")
+            source_export = export_rocketbot_db(str(source))
+            self.assertEqual(source_export["bots"][0]["data_type"], "")
+            self.assertIsNotNone(source_export["bots"][0]["project"])
             self.assertIsNotNone(export_rocketbot_db(str(normalized))["bots"][0]["project"])
 
     def test_rejects_unsafe_normalization_when_payload_is_not_decodable(self) -> None:

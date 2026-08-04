@@ -35,7 +35,7 @@ class PythonProjectBuilderTest(unittest.TestCase):
                 generate_rocketbot_python_project(str(db_path), str(root / "out"), plan["plan_id"])
 
             result = generate_rocketbot_python_project(
-                str(db_path), str(root / "out"), plan["plan_id"], approve=True
+                str(db_path), str(root / "out"), plan["plan_id"], approve=True, normalize_db=True
             )
             self.assertGreater(result["files_created"], 0)
             self.assertTrue(zipfile.is_zipfile(root / "out" / "config" / "config.xlsx"))
@@ -58,13 +58,90 @@ class PythonProjectBuilderTest(unittest.TestCase):
             plan = plan_rocketbot_python_project(str(db_path), str(root / "out"))
             self.assertTrue(plan["database_status"]["requires_normalization"])
             result = generate_rocketbot_python_project(
-                str(db_path), str(root / "out"), plan["plan_id"], approve=True
+                str(db_path), str(root / "out"), plan["plan_id"], approve=True, normalize_db=True
             )
 
             normalization = result["normalization"]
             self.assertTrue(normalization["created_copy"])
             self.assertTrue(Path(normalization["normalized_db"]).exists())
             self.assertEqual(result["approval_plan_id"], plan["plan_id"])
+
+    def test_executable_mode_translates_control_flow_without_stubs(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            db_path = root / "source.db"
+            create_rocketbot_db(
+                str(db_path),
+                {
+                    "bots": [
+                        {
+                            "name": "main",
+                            "project": {
+                                "project": {
+                                    "commands": [{"type": "module", "name": "HU01"}],
+                                    "modules": [{
+                                        "name": "HU01",
+                                        "commands": [
+                                            {"type": "set_variable", "variable": "vLocStrX", "value": "ok"},
+                                            {"type": "for", "iterable": "[]", "var": "item", "body": [{"type": "break"}]},
+                                        ],
+                                    }],
+                                }
+                            },
+                        }
+                    ]
+                },
+            )
+            plan = plan_rocketbot_python_project(
+                str(db_path), str(root / "out"), mode="executable", strict=True
+            )
+            self.assertEqual(plan["status"], "awaiting_approval")
+            self.assertEqual(plan["translation"]["unsupported"], [])
+            result = generate_rocketbot_python_project(
+                str(db_path),
+                str(root / "out"),
+                plan["plan_id"],
+                approve=True,
+                mode="executable",
+                strict=True,
+            )
+            self.assertEqual(result["validation"]["compile_errors"], [])
+            self.assertTrue((root / "out" / "adapters" / "http.py").exists())
+            self.assertNotIn("NotImplementedError", "\n".join(
+                path.read_text(encoding="utf-8")
+                for path in (root / "out").rglob("*.py")
+            ))
+
+    def test_strict_mode_reports_unknown_module_before_generation(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            db_path = root / "source.db"
+            create_rocketbot_db(
+                str(db_path),
+                {
+                    "bots": [{
+                        "name": "main",
+                        "project": {
+                            "project": {
+                                "commands": [{"type": "module", "name": "HU01"}],
+                                "modules": [{
+                                    "name": "HU01",
+                                    "commands": [{
+                                        "type": "module",
+                                        "module_name": "Custom",
+                                        "module": "unknownCommand",
+                                    }],
+                                }],
+                            }
+                        },
+                    }]
+                },
+            )
+            plan = plan_rocketbot_python_project(
+                str(db_path), str(root / "out"), mode="executable", strict=True
+            )
+            self.assertEqual(plan["status"], "blocked_unsupported")
+            self.assertIn("module:unknowncommand", plan["translation"]["unsupported"])
 
 
 if __name__ == "__main__":

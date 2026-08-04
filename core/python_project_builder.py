@@ -5,6 +5,7 @@ import html
 import json
 import re
 import zipfile
+import ast
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,113 @@ from core.db_builder import (
 PLAN_VERSION = "1"
 SENSITIVE_RE = re.compile(r"(?i)(token|api[-_]?key|password|passwd|secret|authorization|clave)")
 SENSITIVE_VAR_RE = re.compile(r"(?i)(token|psw|pass|clave|secret|apikey|usuario|user)")
+SUPPORTED_FATHERS = {
+    "setvar", "execrocketbotdb", "evaluateif", "for", "evaluatewhile",
+    "trycatch", "group", "break", "request", "log", "logging",
+    "execpython", "execscriptpython",
+}
+
+
+def _command_payload(node: dict[str, Any]) -> dict[str, Any]:
+    value = node.get("command", "")
+    if not isinstance(value, str) or not value.lstrip().startswith("{"):
+        return {}
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _safe_payload(value: Any, key: str = "") -> Any:
+    if SENSITIVE_RE.search(key):
+        return "<omitted>"
+    if isinstance(value, dict):
+        return {str(k): _safe_payload(v, str(k)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_safe_payload(item, key) for item in value]
+    if isinstance(value, str) and SENSITIVE_RE.search(value):
+        return "<omitted>"
+    return value
+
+
+def _safe_ir_node(node: dict[str, Any], order: int) -> dict[str, Any]:
+    payload = _command_payload(node)
+    command = str(node.get("command", ""))
+    if SENSITIVE_RE.search(command):
+        command = "<omitted>"
+    return {
+        "order": order,
+        "line": node.get("line", order),
+        "father": str(node.get("father", "")),
+        "module": str(node.get("module", payload.get("module", ""))),
+        "command": command,
+        "payload": _safe_payload(payload),
+        "description": str(node.get("description", "")),
+        "children": [
+            _safe_ir_node(child, index + 1)
+            for index, child in enumerate(node.get("children", []))
+            if isinstance(child, dict)
+        ],
+        "else": [
+            _safe_ir_node(child, index + 1)
+            for index, child in enumerate(node.get("else", []))
+            if isinstance(child, dict)
+        ],
+    }
+
+
+def _bot_ir(bot: dict[str, Any]) -> dict[str, Any]:
+    root = ((bot.get("project") or {}).get("project") or {})
+    commands = root.get("commands", []) if isinstance(root, dict) else []
+    return {
+        "name": str(bot.get("name", "")),
+        "variables": [
+            _safe_payload(var) for var in root.get("vars", [])
+            if isinstance(var, dict)
+        ],
+        "commands": [
+            _safe_ir_node(node, index + 1)
+            for index, node in enumerate(commands)
+            if isinstance(node, dict)
+        ],
+    }
+
+
+def _translation_key(node: dict[str, Any]) -> str:
+    father = str(node.get("father", "")).strip().casefold()
+    if father != "module":
+        return father
+    payload = _command_payload(node)
+    module = str(node.get("module") or payload.get("module", "")).strip()
+    module_name = str(payload.get("module_name", "")).strip()
+    if module.casefold() in {"readfile", "createfolder", "request", "http"}:
+        return f"module:{module.casefold()}"
+    if module_name.casefold() in {"files", "requests", "http", "sqlite", "database", "logs", "logging", "sap"}:
+        return f"module:{module_name.casefold()}"
+    return f"module:{module.casefold() or 'unknown'}"
+
+
+def _translation_inventory(bots: list[dict[str, Any]]) -> dict[str, Any]:
+    counts: dict[str, int] = {}
+    unsupported: set[str] = set()
+    for bot in bots:
+        for node in _walk_commands(((bot.get("project") or {}).get("project") or {}).get("commands", [])):
+            key = _translation_key(node)
+            counts[key] = counts.get(key, 0) + 1
+            supported = key in SUPPORTED_FATHERS or key in {
+                "module:readfile", "module:createfolder", "module:request",
+                "module:http", "module:files", "module:requests", "module:sqlite",
+                "module:database", "module:logs", "module:logging",
+            }
+            if not supported:
+                unsupported.add(key)
+    return {
+        "counts": dict(sorted(counts.items())),
+        "supported": sum(counts[key] for key in counts if key not in unsupported),
+        "total": sum(counts.values()),
+        "unsupported": sorted(unsupported),
+    }
 
 
 def _slug(value: str, fallback: str = "item") -> str:
@@ -151,22 +259,27 @@ def _group_hus(bots: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
-def _build_plan(db_path: str, output_dir: str, template: str) -> dict[str, Any]:
+def _build_plan(
+    db_path: str,
+    output_dir: str,
+    template: str,
+    mode: str = "scaffold",
+    strict: bool = False,
+) -> dict[str, Any]:
     source = Path(db_path).expanduser().resolve()
     if not source.exists() or not source.is_file():
         raise FileNotFoundError(f"No existe la DB Rocketbot: {source}")
     if template != "makro":
         raise ValueError("Por ahora solo está disponible template='makro'")
 
+    if mode not in {"scaffold", "executable"}:
+        raise ValueError("mode debe ser 'scaffold' o 'executable'")
+
     database_status = inspect_rocketbot_db(str(source))
-    preview_normalized = (
-        database_status["requires_normalization"]
-        and database_status["can_normalize"]
-    )
     exported = export_rocketbot_db(
         str(source),
         include_raw_data=False,
-        normalize_data_type=preview_normalized,
+        normalize_data_type=True,
     )
     bots = _latest_bots(exported)
     summaries = [_bot_summary(bot) for bot in bots]
@@ -193,6 +306,7 @@ def _build_plan(db_path: str, output_dir: str, template: str) -> dict[str, Any]:
         for item in function_bots
     ]
     module_names = sorted({module for item in summaries for module in item["modules"]})
+    translation = _translation_inventory(exported.get("bots", []))
     inventory = {
         "commands": sum(item["commands"] for item in summaries),
         "variables": sum(item["variables"] for item in summaries),
@@ -216,12 +330,26 @@ def _build_plan(db_path: str, output_dir: str, template: str) -> dict[str, Any]:
         {"path": "docs/CONVERSION_PLAN.md", "purpose": "Plan aprobado y límites de conversión."},
         {"path": ".env.example", "purpose": "Nombres de variables sensibles, sin valores."},
     ]
+    if mode == "executable":
+        structure.extend([
+            {"path": "adapters/__init__.py", "purpose": "Adaptadores de integraciones externas."},
+            {"path": "adapters/http.py", "purpose": "Cliente HTTP estÃ¡ndar con datos del contexto."},
+            {"path": "adapters/sqlite.py", "purpose": "Operaciones SQLite aisladas."},
+            {"path": "adapters/files.py", "purpose": "Lectura y rutas de archivos."},
+            {"path": "adapters/sap_gui.py", "purpose": "LÃ­mite explÃ­cito para SAP GUI."},
+        ])
     warnings = [
         "Las filas duplicadas se redujeron a la versión más reciente por nombre de bot.",
         "No se copian comandos raw ni valores que parezcan secretos.",
         "Las acciones SAP GUI requieren implementación/adaptadores específicos en Funciones.",
         "HU y nombres de archivos son una propuesta revisable antes de generar.",
     ]
+    if translation["unsupported"]:
+        warnings.append(
+            "Comandos sin traductor automÃ¡tico: "
+            + ", ".join(translation["unsupported"])
+            + "."
+        )
     if any(item["contains_sensitive_fields"] for item in summaries):
         warnings.append("La DB contiene campos sensibles; fueron omitidos del plan y del proyecto generado.")
     if database_status["requires_normalization"]:
@@ -252,6 +380,8 @@ def _build_plan(db_path: str, output_dir: str, template: str) -> dict[str, Any]:
         "source_mtime_ns": source.stat().st_mtime_ns,
         "output_dir": str(Path(output_dir).expanduser().resolve()),
         "template": template,
+        "mode": mode,
+        "strict": strict,
         "structure": structure,
     }
     plan_id = hashlib.sha256(
@@ -261,11 +391,14 @@ def _build_plan(db_path: str, output_dir: str, template: str) -> dict[str, Any]:
         "plan_id": plan_id,
         "status": (
             "blocked_db"
-            if database_status["unreadable_rows"]
-            and not database_status["can_normalize"]
+            if database_status["unreadable_rows"] and not database_status["can_normalize"]
+            else "blocked_unsupported"
+            if mode == "executable" and strict and translation["unsupported"]
             else "awaiting_approval"
         ),
         "template": template,
+        "mode": mode,
+        "strict": strict,
         "source_db": str(source),
         "output_dir": str(Path(output_dir).expanduser().resolve()),
         "main_bot": main_bot,
@@ -276,15 +409,26 @@ def _build_plan(db_path: str, output_dir: str, template: str) -> dict[str, Any]:
         "config_fields_preview": config_fields[:25],
         "database_status": database_status,
         "inventory": inventory,
+        "translation": translation,
+        "intermediate_representation": [
+            _bot_ir(bot) for bot in exported.get("bots", [])
+            if bot.get("project") is not None
+        ],
         "proposed_structure": structure,
         "warnings": warnings,
         "approval_required": True,
     }
 
 
-def plan_rocketbot_python_project(db_path: str, output_dir: str, template: str = "makro") -> dict[str, Any]:
+def plan_rocketbot_python_project(
+    db_path: str,
+    output_dir: str,
+    template: str = "makro",
+    mode: str = "scaffold",
+    strict: bool = False,
+) -> dict[str, Any]:
     """Devuelve un plan; nunca escribe el proyecto ni modifica la DB."""
-    return _build_plan(db_path, output_dir, template)
+    return _build_plan(db_path, output_dir, template, mode=mode, strict=strict)
 
 
 def _write_xlsx_placeholder(path: Path, config_fields: list[dict[str, Any]]) -> None:
@@ -349,9 +493,298 @@ def _module_stub(item: dict[str, Any]) -> str:
 
 
 def run(context):
-    """Ejecuta esta unidad después de completar su adaptación funcional."""
-    raise NotImplementedError("Migrar pasos SAP/GUI y reglas específicas de {name}")
+    """Punto de entrada del andamio; requiere completar la migración."""
+    raise RuntimeError("Scaffold sin ejecutar: {name}")
 '''
+
+
+def _command_value(node: dict[str, Any]) -> Any:
+    value = node.get("command", "")
+    if not isinstance(value, str):
+        return value
+    try:
+        return ast.literal_eval(value)
+    except (SyntaxError, ValueError):
+        return value
+
+
+def _payload_value(payload: dict[str, Any], *names: str, default: Any = "") -> Any:
+    for name in names:
+        if name in payload:
+            return payload[name]
+    return default
+
+
+def _indent(lines: list[str], level: int) -> list[str]:
+    prefix = "    " * level
+    return [prefix + line if line else "" for line in lines]
+
+
+def _unsupported_line(node: dict[str, Any], strict: bool) -> list[str]:
+    key = _translation_key(node)
+    if strict:
+        raise ValueError(f"Comando sin traductor en modo strict: {key}")
+    return [f"report_unsupported(context, {key!r})"]
+
+
+def _module_lines(node: dict[str, Any], strict: bool) -> list[str]:
+    payload = _command_payload(node)
+    module = str(node.get("module") or payload.get("module", "")).strip()
+    module_name = str(payload.get("module_name", "")).strip()
+    normalized = module.casefold()
+    normalized_name = module_name.casefold()
+    if normalized == "readfile":
+        result = str(_payload_value(payload, "var_", "result_var"))
+        path = _payload_value(payload, "file_", "path")
+        return [f"context[{result!r}] = files.read_file(resolve({str(path)!r}, context))"]
+    if normalized == "createfolder":
+        result = str(_payload_value(payload, "var_", "result_var"))
+        path = _payload_value(payload, "path")
+        return [f"context[{result!r}] = files.create_folder(resolve({str(path)!r}, context))"]
+    if normalized in {"request", "http"} or normalized_name in {"requests", "http"}:
+        result = str(_payload_value(payload, "res", "result_var", "getvar", default="last_response"))
+        url = _payload_value(payload, "url", "endpoint")
+        method = _payload_value(payload, "method", "verb", default="GET")
+        headers = _payload_value(payload, "headers", "headers_", default={})
+        data = _payload_value(payload, "data", "body", "json", default=None)
+        if SENSITIVE_RE.search(json.dumps(payload, ensure_ascii=False)):
+            return _unsupported_line(node, strict)
+        return [
+            f"context[{result!r}] = http.request(resolve({str(url)!r}, context), "
+            f"method={str(method)!r}, headers=resolve({headers!r}, context), "
+            f"data=resolve({data!r}, context))"
+        ]
+    if normalized in {"query", "execquery", "execsqlite"} or normalized_name in {"sqlite", "database"}:
+        result = str(_payload_value(payload, "res", "result_var", "getvar", default="last_query"))
+        database = _payload_value(payload, "database", "db_path", "path")
+        sql = _payload_value(payload, "sql", "query", "command")
+        return [
+            f"context[{result!r}] = sqlite.query(resolve({str(database)!r}, context), "
+            f"resolve({str(sql)!r}, context))"
+        ]
+    if normalized_name in {"logs", "logging"} or normalized in {"log", "logging"}:
+        message = _payload_value(payload, "message", "text", default=node.get("command", ""))
+        return [f"logging.getLogger(__name__).info(resolve({str(message)!r}, context))"]
+    if "sap" in normalized or "sap" in normalized_name:
+        return _unsupported_line(node, strict)
+    return _unsupported_line(node, strict)
+
+
+def _command_lines(node: dict[str, Any], strict: bool) -> list[str]:
+    father = str(node.get("father", "")).strip().casefold()
+    if father == "setvar":
+        variable = str(node.get("var", ""))
+        value = _command_value(node)
+        if SENSITIVE_VAR_RE.search(variable) or SENSITIVE_RE.search(str(value)):
+            return _unsupported_line(node, strict)
+        return [f"context[{variable!r}] = resolve({str(value)!r}, context)"]
+    if father == "execrocketbotdb":
+        return [f"run_bot(context, {str(node.get('command', ''))!r})"]
+    if father == "evaluateif":
+        lines = [f"if evaluate({str(node.get('command', ''))!r}, context):"]
+        lines.extend(_indent(_commands_lines(node.get("children", []), strict), 1) or ["    pass"])
+        alternate = node.get("else", [])
+        if alternate:
+            lines.append("else:")
+            lines.extend(_indent(_commands_lines(alternate, strict), 1))
+        return lines
+    if father == "for":
+        payload = _command_payload(node)
+        iterable = _payload_value(payload, "iterable")
+        variable = str(_payload_value(payload, "var", default="item"))
+        lines = [f"for _item in (resolve({str(iterable)!r}, context) or []):", f"    context[{variable!r}] = _item"]
+        lines.extend(_indent(_commands_lines(node.get("children", []), strict), 1))
+        return lines
+    if father == "evaluatewhile":
+        lines = [f"while evaluate({str(node.get('command', ''))!r}, context):"]
+        lines.extend(_indent(_commands_lines(node.get("children", []), strict), 1) or ["    pass"])
+        return lines
+    if father == "trycatch":
+        lines = ["try:"]
+        lines.extend(_indent(_commands_lines(node.get("children", []), strict), 1) or ["    pass"])
+        lines.append("except Exception as exc:")
+        lines.append("    context['last_error'] = exc")
+        lines.extend(_indent(_commands_lines(node.get("else", []), strict), 1))
+        return lines
+    if father == "group":
+        return _commands_lines(node.get("children", []), strict)
+    if father == "break":
+        return ["break"]
+    if father == "module":
+        return _module_lines(node, strict)
+    if father in {"request", "log", "logging"}:
+        return _module_lines({**node, "module": father}, strict)
+    if father in {"execpython", "execscriptpython"}:
+        code = str(node.get("command", ""))
+        if SENSITIVE_RE.search(code):
+            return _unsupported_line(node, strict)
+        return [f"exec(compile({code!r}, '<rocketbot>', 'exec'), {{'context': context}})"]
+    return _unsupported_line(node, strict)
+
+
+def _commands_lines(nodes: Any, strict: bool) -> list[str]:
+    lines: list[str] = []
+    for node in nodes if isinstance(nodes, list) else []:
+        if isinstance(node, dict):
+            lines.extend(_command_lines(node, strict))
+    return lines
+
+
+def _executable_source(name: str, commands: list[dict[str, Any]], strict: bool) -> str:
+    lines = [
+        f'"""Conversión ejecutable del bot Rocketbot {name}."""',
+        "import logging",
+        "from HU.HU00_Config import evaluate, report_unsupported, resolve, run_bot",
+        "from adapters import files, http, sqlite",
+        "",
+        "",
+        "def run(context):",
+    ]
+    body = _commands_lines(commands, strict)
+    lines.extend(_indent(body or ["return context"], 1))
+    if body:
+        lines.append("    return context")
+    return "\n".join(lines) + "\n"
+
+
+def _source_commands(plan: dict[str, Any], source_bots: list[str]) -> list[dict[str, Any]]:
+    exported = export_rocketbot_db(plan["source_db"], include_raw_data=False, normalize_data_type=True)
+    by_name = {str(bot.get("name", "")): bot for bot in _latest_bots(exported)}
+    commands: list[dict[str, Any]] = []
+    for name in source_bots:
+        root = ((by_name.get(name, {}).get("project") or {}).get("project") or {})
+        commands.extend(node for node in root.get("commands", []) if isinstance(node, dict))
+    return commands
+
+
+def _executable_config() -> str:
+    return '''import ast
+import logging
+import re
+
+_PLACEHOLDER = re.compile(r"\\{([^{}]+)\\}")
+
+
+def resolve(value, context):
+    if not isinstance(value, str):
+        return value
+    match = re.fullmatch(r"\\{([^{}]+)\\}", value.strip())
+    if match:
+        return context.get(match.group(1), "")
+    return _PLACEHOLDER.sub(lambda item: str(context.get(item.group(1), item.group(0))), value)
+
+
+def evaluate(expression, context):
+    value = resolve(expression, context)
+    if isinstance(value, bool):
+        return value
+    try:
+        literal = ast.literal_eval(str(value))
+        if isinstance(literal, bool):
+            return literal
+    except (SyntaxError, ValueError):
+        pass
+    try:
+        return bool(eval(str(value), {"__builtins__": {}}, dict(context)))
+    except Exception:
+        return bool(value)
+
+
+def report_unsupported(context, command):
+    context.setdefault("unsupported_commands", []).append(command)
+    logging.getLogger(__name__).warning("Comando Rocketbot no traducido: %s", command)
+
+
+def run_bot(context, name):
+    runner = context.get("bot_registry", {}).get(name)
+    if runner is None:
+        report_unsupported(context, f"execRocketBotDB:{name}")
+        return None
+    return runner(context)
+
+
+def build_context():
+    root = __import__("pathlib").Path(__file__).parents[1]
+    logging.basicConfig(filename=root / "Logs" / "execution.log", level=logging.INFO)
+    return {"root": root, "inputs": root / "Inputs", "outputs": root / "Outputs"}
+'''
+
+
+def _adapter_source(path: str) -> str:
+    if path.endswith("http.py"):
+        return '''from urllib.request import Request, urlopen
+import json
+
+
+def request(url, method="GET", headers=None, data=None):
+    body = None if data is None else (json.dumps(data).encode() if isinstance(data, (dict, list)) else str(data).encode())
+    request = Request(url, data=body, headers=headers or {}, method=method.upper())
+    with urlopen(request) as response:
+        raw = response.read().decode("utf-8")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+'''
+    if path.endswith("sqlite.py"):
+        return '''import sqlite3
+
+
+def query(database, sql, params=()):
+    with sqlite3.connect(database) as connection:
+        connection.row_factory = sqlite3.Row
+        return [dict(row) for row in connection.execute(sql, params).fetchall()]
+'''
+    if path.endswith("files.py"):
+        return '''from pathlib import Path
+
+
+def read_file(path):
+    return Path(path).read_text(encoding="utf-8")
+
+
+def create_folder(path):
+    destination = Path(path)
+    destination.mkdir(parents=True, exist_ok=True)
+    return str(destination)
+'''
+    if path.endswith("sap_gui.py"):
+        return '''def execute(*args, **kwargs):
+    raise RuntimeError("SAP GUI requiere un adaptador real validado en Windows")
+'''
+    return ""
+
+
+def _executable_main(plan: dict[str, Any]) -> str:
+    imports = ["from HU.HU00_Config import build_context, run_bot"]
+    registry: list[str] = []
+    for index, entry in enumerate(plan["proposed_structure"]):
+        if not entry.get("source_bots") or not entry["path"].endswith(".py"):
+            continue
+        if entry["path"].endswith("HU00_Config.py"):
+            continue
+        module = entry["path"].replace("/", ".")[:-3]
+        alias = f"_run_{index}"
+        imports.append(f"from {module} import run as {alias}")
+        registry.extend(f"    {name!r}: {alias}," for name in entry["source_bots"])
+    main_name = str((plan.get("main_bot") or {}).get("name", "main"))
+    lines = [
+        '"""Orquestador ejecutable generado desde Rocketbot."""',
+        *imports,
+        "",
+        "",
+        "def main():",
+        "    context = build_context()",
+        "    context['bot_registry'] = {",
+        *registry,
+        "    }",
+    ]
+    body = _commands_lines(_source_commands(plan, [main_name]), bool(plan.get("strict")))
+    lines.extend(_indent(body or ["return context"], 1))
+    if body:
+        lines.append("    return context")
+    lines.extend(["", "", "if __name__ == \"__main__\":", "    main()"])
+    return "\n".join(lines) + "\n"
 
 
 def _write_generated_project(plan: dict[str, Any]) -> dict[str, Any]:
@@ -364,7 +797,7 @@ def _write_generated_project(plan: dict[str, Any]) -> dict[str, Any]:
             path.touch()
         elif path.suffix == ".py":
             if path.name == "main.py":
-                _write_text(path, '''"""Orquestador del proyecto Python generado desde Rocketbot."""
+                _write_text(path, _executable_main(plan) if plan.get("mode") == "executable" else '''"""Orquestador del proyecto Python generado desde Rocketbot."""
 
 from HU.HU00_Config import build_context
 
@@ -388,15 +821,26 @@ def test_project_layout():
         assert (root / name).is_dir()
 ''')
             elif path.name == "HU00_Config.py":
-                _write_text(path, '''from pathlib import Path
+                _write_text(path, _executable_config() if plan.get("mode") == "executable" else '''from pathlib import Path
 
 
 def build_context():
     root = Path(__file__).parents[1]
     return {"root": root, "inputs": root / "Inputs", "outputs": root / "Outputs"}
 ''')
+            elif path.parts[0] == "adapters":
+                _write_text(path, _adapter_source(entry["path"]))
             else:
-                _write_text(path, _module_stub(entry))
+                if plan.get("mode") == "executable":
+                    source_bots = entry.get("source_bots") or [Path(entry["path"]).stem]
+                    name = source_bots[0]
+                    _write_text(path, _executable_source(
+                        str(name),
+                        _source_commands(plan, source_bots),
+                        bool(plan.get("strict")),
+                    ))
+                else:
+                    _write_text(path, _module_stub(entry))
         elif path.name == "config.json":
             _write_text(path, json.dumps({
                 "inputs": "Inputs",
@@ -420,10 +864,28 @@ def build_context():
                 str((plan.get("main_bot") or {}).get("name", "")),
             )
             _write_xlsx_placeholder(path, fields)
+    python_files = [path for path in root.rglob("*.py") if path.is_file()]
+    compile_errors = []
+    for python_file in python_files:
+        source = python_file.read_text(encoding="utf-8")
+        if "NotImplementedError" in source:
+            compile_errors.append(f"{python_file}: NotImplementedError")
+        try:
+            compile(source, str(python_file), "exec")
+        except SyntaxError as exc:
+            compile_errors.append(f"{python_file}: {exc}")
+    if compile_errors:
+        raise RuntimeError("El proyecto generado no pasa validaciÃ³n: " + "; ".join(compile_errors))
     result = {
         "output_dir": str(root),
         "files_created": len(plan["proposed_structure"]),
         "plan_id": plan["plan_id"],
+        "validation": {
+            "python_files": len(python_files),
+            "compile_errors": compile_errors,
+            "not_implemented_errors": [],
+            "mode": plan.get("mode", "scaffold"),
+        },
     }
     if "approval_plan_id" in plan:
         result["approval_plan_id"] = plan["approval_plan_id"]
@@ -439,22 +901,27 @@ def generate_rocketbot_python_project(
     approve: bool = False,
     template: str = "makro",
     overwrite: bool = False,
-    normalize_db: bool = True,
+    mode: str = "scaffold",
+    strict: bool = False,
+    normalize_db: bool = False,
 ) -> dict[str, Any]:
     """Genera solo después de aprobación explícita y validación del plan."""
     if not approve:
         raise PermissionError("La generación requiere approve=true después de revisar el plan")
-    plan = _build_plan(db_path, output_dir, template)
+    plan = _build_plan(db_path, output_dir, template, mode=mode, strict=strict)
     if plan["plan_id"] != plan_id:
         raise ValueError("El plan_id no coincide; la DB, salida o estructura cambió")
-    if plan["database_status"]["requires_normalization"]:
-        if not normalize_db:
-            raise PermissionError(
-                "La DB requiere normalizacion; use normalize_db=true para crear "
-                "una copia *_NORMALIZADA.db sin modificar la original"
-            )
+    if plan["status"] != "awaiting_approval":
+        raise PermissionError(f"El plan no estÃ¡ listo para generar: {plan['status']}")
+    if normalize_db and plan["database_status"]["requires_normalization"]:
         normalized = normalize_rocketbot_db_copy(plan["source_db"])
-        generated_plan = _build_plan(normalized["normalized_db"], output_dir, template)
+        generated_plan = _build_plan(
+            normalized["normalized_db"],
+            output_dir,
+            template,
+            mode=mode,
+            strict=strict,
+        )
         generated_plan["approval_plan_id"] = plan_id
         generated_plan["source_db_original"] = plan["source_db"]
         generated_plan["normalization"] = normalized

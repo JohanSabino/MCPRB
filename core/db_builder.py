@@ -1093,7 +1093,10 @@ def export_rocketbot_db(
             "father": father or "",
         }
 
-        should_decode = (data_type or "") == "normal" or normalize_data_type
+        # Rocketbot exports legible payloads with inconsistent data_type values.
+        # Decode in memory first; normalization remains an optional compatibility
+        # path and never becomes a prerequisite for reading.
+        should_decode = True
         if should_decode:
             try:
                 item["project"] = _decode_normal_payload(data or "")

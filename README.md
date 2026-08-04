@@ -567,27 +567,53 @@ Generar después de revisar:
   "approve": true,
   "template": "makro",
   "overwrite": false,
-  "normalize_db": true
+  "mode": "scaffold",
+  "strict": false,
+  "normalize_db": false
 }
 ```
 
 Si la DB no se puede leer, el plan revisa primero si el bloqueo proviene de
-`data_type` distinto de `normal`. Cuando el payload sigue siendo decodificable,
-la generación aprobada crea una copia `*_NORMALIZADA.db`, cambia ese estado solo
-en la copia y conserva intacta la DB original. El plan informa:
+`data_type` distinto de `normal`. El payload se intenta decodificar en memoria;
+si se solicita explícitamente `normalize_db: true`, se crea una copia
+`*_NORMALIZADA.db`, se cambia ese estado solo en la copia y se conserva intacta
+la DB original. El plan informa:
 
 - filas totales, decodificadas y pendientes;
 - filas que pueden normalizarse de forma segura;
 - ruta propuesta de la copia normalizada;
 - inventario de comandos, variables, módulos y candidatos a adaptadores.
 
-La generación usa esta opción por defecto después de `approve: true`. Puede
-desactivarse con `normalize_db: false` si se desea detener la conversión ante
-una DB que requiera normalización.
+La normalización es opcional y está desactivada por defecto.
 
 La generación no copia comandos raw ni valores que parezcan secretos. Las
 acciones que dependen del entorno, como SAP GUI, quedan marcadas para
 adaptación manual.
+
+Para convertir lógica real, planifica también el modo:
+
+```json
+{
+  "db_path": "C:/temp/robot.db",
+  "output_dir": "C:/temp/robot_python",
+  "template": "makro",
+  "mode": "executable",
+  "strict": true
+}
+```
+
+`mode: "scaffold"` conserva la estructura revisable. `mode: "executable"`
+genera HUs y funciones con la representación intermedia, flujo de variables,
+condiciones, ciclos, try/except, llamadas entre bots y adaptadores estándar
+para HTTP, SQLite y archivos. `strict: true` detiene el plan si existe un
+comando sin traductor; con `false` lo conserva en `unsupported_commands` y lo
+reporta en logs. La salida ejecutable se valida con compilación Python y no
+contiene `NotImplementedError`.
+
+La lectura intenta decodificar cada payload como Base64/JSON aunque
+`data_type` esté vacío. `normalize_db: true` sigue disponible solo como
+compatibilidad para crear una copia `*_NORMALIZADA.db`; no es necesaria para
+leer ni planificar y nunca modifica la DB original.
 
 Para optimizar proyectos Python grandes, se recomienda evaluar
 [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)

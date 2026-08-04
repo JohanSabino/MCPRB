@@ -271,11 +271,15 @@ def plan_rocketbot_python_conversion(
     db_path: str = Field(description="Ruta de la DB Rocketbot fuente"),
     output_dir: str = Field(description="Carpeta propuesta para el proyecto Python"),
     template: str = Field(default="makro", description="Estructura objetivo; por ahora makro"),
+    mode: str = Field(default="scaffold", description="scaffold o executable"),
+    strict: bool = Field(default=False, description="Bloquea si queda un comando sin traducir"),
 ) -> dict[str, object]:
     return plan_rocketbot_python_project(
         db_path=db_path,
         output_dir=output_dir,
         template=template,
+        mode=mode,
+        strict=strict,
     )
 
 
@@ -286,6 +290,8 @@ def generate_rocketbot_python_conversion(
     plan_id: str = Field(description="plan_id devuelto por plan_rocketbot_python_conversion"),
     approve: bool = Field(default=False, description="Aprobación explícita del plan revisado"),
     template: str = Field(default="makro", description="Estructura objetivo; por ahora makro"),
+    mode: str = Field(default="scaffold", description="scaffold o executable"),
+    strict: bool = Field(default=False, description="Falla si queda un comando sin traducir"),
     normalize_db: bool = Field(
         default=True,
         description="Crea una copia *_NORMALIZADA.db si data_type bloquea la lectura",
@@ -298,6 +304,8 @@ def generate_rocketbot_python_conversion(
         plan_id=plan_id,
         approve=approve,
         template=template,
+        mode=mode,
+        strict=strict,
         overwrite=overwrite,
         normalize_db=normalize_db,
     )

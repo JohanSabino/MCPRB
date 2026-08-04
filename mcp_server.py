@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ from pydantic import Field
 from dotenv import load_dotenv
 
 from core.db_builder import create_rocketbot_db, create_rocketbot_db_from_bots, export_rocketbot_db
+from core.codex_cli import run_codex_cli
 from core.file_reader import ensure_within, read_text_file, resolve_project_path
 from core.logs import list_log_files, read_log_file_tail, read_log_tail
 from core.module_catalog import (
@@ -442,6 +444,9 @@ if MCP_ENABLE_RESOURCES:
 
 
 def main() -> None:
+    if len(sys.argv) > 1:
+        raise SystemExit(run_codex_cli(sys.argv[1:]))
+
     transport = os.getenv("MCP_TRANSPORT", "stdio").strip().lower() or "stdio"
     mcp.run(transport=transport)
 

@@ -107,25 +107,50 @@ def _translation_key(node: dict[str, Any]) -> str:
     return f"module:{module.casefold() or 'unknown'}"
 
 
+def _is_translatable(node: dict[str, Any], key: str | None = None) -> bool:
+    key = key or _translation_key(node)
+    supported = key in SUPPORTED_FATHERS or key in {
+        "module:readfile", "module:createfolder", "module:request",
+        "module:http", "module:files", "module:requests", "module:sqlite",
+        "module:database", "module:logs", "module:logging",
+    }
+    if not supported:
+        return False
+    father = str(node.get("father", "")).casefold()
+    if father == "setvar":
+        return not (
+            SENSITIVE_VAR_RE.search(str(node.get("var", "")))
+            or SENSITIVE_RE.search(str(_command_value(node)))
+        )
+    if father == "module" and key in {"module:request", "module:http", "module:requests"}:
+        return not SENSITIVE_RE.search(json.dumps(_command_payload(node), ensure_ascii=False))
+    if father in {"execpython", "execscriptpython"}:
+        return not SENSITIVE_RE.search(str(node.get("command", "")))
+    return True
+
+
 def _translation_inventory(bots: list[dict[str, Any]]) -> dict[str, Any]:
     counts: dict[str, int] = {}
     unsupported: set[str] = set()
+    unsupported_details: list[dict[str, Any]] = []
     for bot in bots:
+        bot_name = str(bot.get("name", ""))
         for node in _walk_commands(((bot.get("project") or {}).get("project") or {}).get("commands", [])):
             key = _translation_key(node)
             counts[key] = counts.get(key, 0) + 1
-            supported = key in SUPPORTED_FATHERS or key in {
-                "module:readfile", "module:createfolder", "module:request",
-                "module:http", "module:files", "module:requests", "module:sqlite",
-                "module:database", "module:logs", "module:logging",
-            }
-            if not supported:
+            if not _is_translatable(node, key):
                 unsupported.add(key)
+                unsupported_details.append({
+                    "command": key,
+                    "bot": bot_name,
+                    "line": node.get("line", ""),
+                })
     return {
         "counts": dict(sorted(counts.items())),
         "supported": sum(counts[key] for key in counts if key not in unsupported),
         "total": sum(counts.values()),
         "unsupported": sorted(unsupported),
+        "unsupported_details": unsupported_details,
     }
 
 
@@ -306,7 +331,7 @@ def _build_plan(
         for item in function_bots
     ]
     module_names = sorted({module for item in summaries for module in item["modules"]})
-    translation = _translation_inventory(exported.get("bots", []))
+    translation = _translation_inventory(bots)
     inventory = {
         "commands": sum(item["commands"] for item in summaries),
         "variables": sum(item["variables"] for item in summaries),
@@ -411,7 +436,7 @@ def _build_plan(
         "inventory": inventory,
         "translation": translation,
         "intermediate_representation": [
-            _bot_ir(bot) for bot in exported.get("bots", [])
+            _bot_ir(bot) for bot in bots
             if bot.get("project") is not None
         ],
         "proposed_structure": structure,
@@ -522,9 +547,17 @@ def _indent(lines: list[str], level: int) -> list[str]:
 
 def _unsupported_line(node: dict[str, Any], strict: bool) -> list[str]:
     key = _translation_key(node)
+    detail = {
+        "command": key,
+        "bot": str(node.get("_bot", "")),
+        "line": node.get("line", ""),
+    }
     if strict:
-        raise ValueError(f"Comando sin traductor en modo strict: {key}")
-    return [f"report_unsupported(context, {key!r})"]
+        raise ValueError(
+            f"Comando sin traductor en modo strict: {key} "
+            f"(bot={detail['bot']}, linea={detail['line']})"
+        )
+    return [f"report_unsupported(context, {detail!r})"]
 
 
 def _module_lines(node: dict[str, Any], strict: bool) -> list[str]:
@@ -615,10 +648,32 @@ def _command_lines(node: dict[str, Any], strict: bool) -> list[str]:
     if father in {"request", "log", "logging"}:
         return _module_lines({**node, "module": father}, strict)
     if father in {"execpython", "execscriptpython"}:
-        code = str(node.get("command", ""))
-        if SENSITIVE_RE.search(code):
+        script = str(node.get("command", ""))
+        payload = _command_payload(node)
+        script = str(_payload_value(payload, "path", "file", "script", default=script))
+        if SENSITIVE_RE.search(script):
             return _unsupported_line(node, strict)
-        return [f"exec(compile({code!r}, '<rocketbot>', 'exec'), {{'context': context}})"]
+        if father == "execpython" and (
+            script.casefold().endswith(".py")
+            or "/" in script
+            or "\\" in script
+            or script.startswith(".")
+        ):
+            detail = {
+                "command": "execPython",
+                "bot": str(node.get("_bot", "")),
+                "line": node.get("line", ""),
+            }
+            return [
+                f"_script_path = Path(resolve({script!r}, context))",
+                "if not _script_path.is_absolute():",
+                "    _script_path = Path(context['root']) / _script_path",
+                "if not _script_path.is_file():",
+                f"    report_unsupported(context, {{**{detail!r}, 'reason': f'Archivo no existe: {{_script_path}}'}})",
+                "else:",
+                "    execute_rocketbot_file(_script_path, context)",
+            ]
+        return [f"execute_rocketbot_script({script!r}, context)"]
     return _unsupported_line(node, strict)
 
 
@@ -634,7 +689,11 @@ def _executable_source(name: str, commands: list[dict[str, Any]], strict: bool) 
     lines = [
         f'"""Conversión ejecutable del bot Rocketbot {name}."""',
         "import logging",
-        "from HU.HU00_Config import evaluate, report_unsupported, resolve, run_bot",
+        "from pathlib import Path",
+        "from HU.HU00_Config import (",
+        "    evaluate, execute_rocketbot_file, execute_rocketbot_script,",
+        "    report_unsupported, resolve, run_bot,",
+        ")",
         "from adapters import files, http, sqlite",
         "",
         "",
@@ -650,10 +709,22 @@ def _executable_source(name: str, commands: list[dict[str, Any]], strict: bool) 
 def _source_commands(plan: dict[str, Any], source_bots: list[str]) -> list[dict[str, Any]]:
     exported = export_rocketbot_db(plan["source_db"], include_raw_data=False, normalize_data_type=True)
     by_name = {str(bot.get("name", "")): bot for bot in _latest_bots(exported)}
+    def annotate(node: dict[str, Any], bot_name: str) -> dict[str, Any]:
+        return {
+            **node,
+            "_bot": bot_name,
+            "children": [annotate(child, bot_name) for child in node.get("children", []) if isinstance(child, dict)],
+            "else": [annotate(child, bot_name) for child in node.get("else", []) if isinstance(child, dict)],
+        }
+
     commands: list[dict[str, Any]] = []
     for name in source_bots:
         root = ((by_name.get(name, {}).get("project") or {}).get("project") or {})
-        commands.extend(node for node in root.get("commands", []) if isinstance(node, dict))
+        commands.extend(
+            annotate(node, name)
+            for node in root.get("commands", [])
+            if isinstance(node, dict)
+        )
     return commands
 
 
@@ -661,6 +732,7 @@ def _executable_config() -> str:
     return '''import ast
 import logging
 import re
+from pathlib import Path
 
 _PLACEHOLDER = re.compile(r"\\{([^{}]+)\\}")
 
@@ -701,6 +773,34 @@ def run_bot(context, name):
         report_unsupported(context, f"execRocketBotDB:{name}")
         return None
     return runner(context)
+
+
+def GetVar(name, context):
+    return context.get(name, "")
+
+
+def SetVar(name, value, context):
+    context[name] = value
+
+
+def execute_rocketbot_script(source, context, filename="<rocketbot>"):
+    namespace = {
+        "context": context,
+        "GetVar": lambda name: GetVar(name, context),
+        "SetVar": lambda name, value: SetVar(name, value, context),
+    }
+    exec(compile(source, filename, "exec"), namespace, namespace)
+
+
+def execute_rocketbot_file(path, context):
+    script_path = Path(path)
+    if not script_path.is_file():
+        raise FileNotFoundError(f"Archivo Rocketbot no encontrado: {script_path}")
+    execute_rocketbot_script(
+        script_path.read_text(encoding="utf-8"),
+        context,
+        str(script_path),
+    )
 
 
 def build_context():
@@ -756,7 +856,18 @@ def create_folder(path):
 
 
 def _executable_main(plan: dict[str, Any]) -> str:
-    imports = ["from HU.HU00_Config import build_context, run_bot"]
+    imports = [
+        "from pathlib import Path",
+        "from HU.HU00_Config import (",
+        "    build_context,",
+        "    run_bot,",
+        "    resolve,",
+        "    evaluate,",
+        "    report_unsupported,",
+        "    execute_rocketbot_file,",
+        "    execute_rocketbot_script,",
+        ")",
+    ]
     registry: list[str] = []
     for index, entry in enumerate(plan["proposed_structure"]):
         if not entry.get("source_bots") or not entry["path"].endswith(".py"):

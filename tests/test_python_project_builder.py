@@ -2,6 +2,9 @@ import tempfile
 import unittest
 import zipfile
 import sqlite3
+import runpy
+import sys
+import logging
 from pathlib import Path
 
 from core.db_builder import create_rocketbot_db
@@ -142,6 +145,56 @@ class PythonProjectBuilderTest(unittest.TestCase):
             )
             self.assertEqual(plan["status"], "blocked_unsupported")
             self.assertIn("module:unknowncommand", plan["translation"]["unsupported"])
+            detail = plan["translation"]["unsupported_details"][0]
+            self.assertEqual(detail["bot"], "HU01")
+            self.assertEqual(detail["line"], 1)
+
+    def test_executable_fixture_runs_scripts_and_reports_unsupported_commands(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            script = root / "fixture_script.py"
+            script.write_text('SetVar("vLocStrX", "from_script")\n', encoding="utf-8")
+            db_path = root / "source.db"
+            create_rocketbot_db(
+                str(db_path),
+                {
+                    "bots": [{
+                        "name": "main",
+                        "project": {
+                            "project": {
+                                "commands": [{"type": "module", "name": "HU01"}],
+                                "modules": [{
+                                    "name": "HU01",
+                                    "commands": [
+                                        {"type": "exec_python", "path": str(script)},
+                                        {"type": "module", "module_name": "Custom", "module": "unknown"},
+                                    ],
+                                }],
+                            }
+                        },
+                    }]
+                },
+            )
+            plan = plan_rocketbot_python_project(
+                str(db_path), str(root / "out"), mode="executable", strict=False
+            )
+            result = generate_rocketbot_python_project(
+                str(db_path), str(root / "out"), plan["plan_id"],
+                approve=True, mode="executable", strict=False,
+            )
+            main_source = (root / "out" / "main.py").read_text(encoding="utf-8")
+            for helper in ("build_context", "run_bot", "resolve", "evaluate", "report_unsupported"):
+                self.assertIn(helper, main_source)
+            sys.path.insert(0, str(root / "out"))
+            try:
+                namespace = runpy.run_path(str(root / "out" / "main.py"))
+                context = namespace["main"]()
+            finally:
+                sys.path.remove(str(root / "out"))
+            logging.shutdown()
+            self.assertEqual(context["vLocStrX"], "from_script")
+            self.assertEqual(context["unsupported_commands"][0]["command"], "module:unknown")
+            self.assertEqual(result["validation"]["not_implemented_errors"], [])
 
 
 if __name__ == "__main__":

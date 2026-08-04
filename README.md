@@ -610,6 +610,12 @@ comando sin traductor; con `false` lo conserva en `unsupported_commands` y lo
 reporta en logs. La salida ejecutable se valida con compilación Python y no
 contiene `NotImplementedError`.
 
+En `strict: true`, el plan devuelve `blocked_unsupported` junto con
+`translation.unsupported_details`, incluyendo comando, bot y línea. Los
+scripts `execPython` se resuelven como archivos cuando contienen una ruta;
+`execScriptPython` y scripts inline usan el puente `GetVar`/`SetVar` del
+proyecto generado. Una ruta inexistente se reporta en `unsupported_commands`.
+
 La lectura intenta decodificar cada payload como Base64/JSON aunque
 `data_type` esté vacío. `normalize_db: true` sigue disponible solo como
 compatibilidad para crear una copia `*_NORMALIZADA.db`; no es necesaria para

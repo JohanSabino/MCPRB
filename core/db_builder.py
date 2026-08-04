@@ -790,6 +790,16 @@ def _build_action(action: dict[str, Any], index: int, line: str | int) -> dict[s
         return _build_while(action, index=index, line=line)
     if action_type in {"try", "try_catch", "trycatch"}:
         return _build_try_catch(action, index=index, line=line)
+    if action_type in {"exec_python", "execpython", "exec_script_python", "execscriptpython"}:
+        father = "execPython" if "script" not in action_type else "execScriptPython"
+        return _command_base(
+            father=father,
+            command=str(action.get("path", action.get("file", action.get("script", action.get("command", ""))))),
+            group="scripts",
+            index=index,
+            line=line,
+            description=str(action.get("description", "")),
+        )
     if action_type == "group":
         return _build_group(action, index=index, line=line)
     if action_type == "break":

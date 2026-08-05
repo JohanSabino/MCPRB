@@ -20,6 +20,10 @@ from core.db_builder import (
 PLAN_VERSION = "1"
 SENSITIVE_RE = re.compile(r"(?i)(token|api[-_]?key|password|passwd|secret|authorization|clave)")
 SENSITIVE_VAR_RE = re.compile(r"(?i)(token|psw|pass|clave|secret|apikey|usuario|user)")
+CONFIG_KEY_RE = re.compile(
+    r"\bConfig\s*(?:\[\s*['\"]([^'\"]+)['\"]\s*\]|\.\s*get\s*\(\s*['\"]([^'\"]+)['\"])",
+)
+MINIMUM_CONFIG_KEYS = ("AsuntoInicio", "CuerpoInicio")
 SUPPORTED_FATHERS = {
     "setvar", "execrocketbotdb", "evaluateif", "for", "evaluatewhile",
     "trycatch", "group", "break", "request", "log", "logging",
@@ -100,6 +104,8 @@ def _translation_key(node: dict[str, Any]) -> str:
     payload = _command_payload(node)
     module = str(node.get("module") or payload.get("module", "")).strip()
     module_name = str(payload.get("module_name", "")).strip()
+    if module.casefold() == "cargarconfigpadre" or module_name.casefold() == "cargarconfigpadre":
+        return "module:cargarconfigpadre"
     if module.casefold() in {"readfile", "createfolder", "request", "http"}:
         return f"module:{module.casefold()}"
     if module_name.casefold() in {"files", "requests", "http", "sqlite", "database", "logs", "logging", "sap"}:
@@ -113,6 +119,7 @@ def _is_translatable(node: dict[str, Any], key: str | None = None) -> bool:
         "module:readfile", "module:createfolder", "module:request",
         "module:http", "module:files", "module:requests", "module:sqlite",
         "module:database", "module:logs", "module:logging",
+        "module:cargarconfigpadre",
     }
     if not supported:
         return False
@@ -166,6 +173,20 @@ def _walk_commands(nodes: Any):
         yield node
         yield from _walk_commands(node.get("children"))
         yield from _walk_commands(node.get("else"))
+
+
+def _config_keys(bots: list[dict[str, Any]]) -> list[str]:
+    keys = set(MINIMUM_CONFIG_KEYS)
+    for bot in bots:
+        root = ((bot.get("project") or {}).get("project") or {})
+        for node in _walk_commands(root.get("commands", [])):
+            source = str(node.get("command", ""))
+            payload = _command_payload(node)
+            if payload:
+                source += " " + json.dumps(payload, ensure_ascii=False)
+            for match in CONFIG_KEY_RE.finditer(source):
+                keys.add(match.group(1) or match.group(2))
+    return sorted(keys)
 
 
 def _latest_bots(exported: dict[str, Any]) -> list[dict[str, Any]]:
@@ -317,6 +338,7 @@ def _build_plan(
     hu_files = _group_hus(bots)
     main_name = str((main_bot or {}).get("name", ""))
     config_fields = _config_fields(bots, main_name)
+    config_keys = _config_keys(bots)
     function_bots = [
         item for item in summaries
         if item["name"] not in {entry for hu in hu_files for entry in hu["source_bots"]}
@@ -407,6 +429,7 @@ def _build_plan(
         "template": template,
         "mode": mode,
         "strict": strict,
+        "config_keys": config_keys,
         "structure": structure,
     }
     plan_id = hashlib.sha256(
@@ -432,6 +455,7 @@ def _build_plan(
         "proposed_functions": function_files,
         "config_fields_count": len(config_fields),
         "config_fields_preview": config_fields[:25],
+        "config_keys": config_keys,
         "database_status": database_status,
         "inventory": inventory,
         "translation": translation,
@@ -566,6 +590,8 @@ def _module_lines(node: dict[str, Any], strict: bool) -> list[str]:
     module_name = str(payload.get("module_name", "")).strip()
     normalized = module.casefold()
     normalized_name = module_name.casefold()
+    if normalized == "cargarconfigpadre" or normalized_name == "cargarconfigpadre":
+        return ["load_config(context)"]
     if normalized == "readfile":
         result = str(_payload_value(payload, "var_", "result_var"))
         path = _payload_value(payload, "file_", "path")
@@ -692,7 +718,7 @@ def _executable_source(name: str, commands: list[dict[str, Any]], strict: bool) 
         "from pathlib import Path",
         "from HU.HU00_Config import (",
         "    evaluate, execute_rocketbot_file, execute_rocketbot_script,",
-        "    report_unsupported, resolve, run_bot,",
+        "    load_config, report_unsupported, resolve, run_bot,",
         ")",
         "from adapters import files, http, sqlite",
         "",
@@ -728,13 +754,16 @@ def _source_commands(plan: dict[str, Any], source_bots: list[str]) -> list[dict[
     return commands
 
 
-def _executable_config() -> str:
-    return '''import ast
+def _executable_config(required_keys: list[str]) -> str:
+    required_keys_literal = repr(tuple(required_keys))
+    template = '''import ast
+import json
 import logging
 import re
 from pathlib import Path
 
 _PLACEHOLDER = re.compile(r"\\{([^{}]+)\\}")
+REQUIRED_CONFIG_KEYS = __REQUIRED_CONFIG_KEYS__
 
 
 def resolve(value, context):
@@ -776,7 +805,10 @@ def run_bot(context, name):
 
 
 def GetVar(name, context):
-    return context.get(name, "")
+    value = context.get(name, "")
+    if isinstance(value, (dict, list)):
+        return repr(value)
+    return value
 
 
 def SetVar(name, value, context):
@@ -803,11 +835,31 @@ def execute_rocketbot_file(path, context):
     )
 
 
+def load_config(context, required_keys=REQUIRED_CONFIG_KEYS):
+    config_path = Path(context["root"]) / "config" / "config.json"
+    if not config_path.is_file():
+        raise FileNotFoundError(f"Falta el archivo de configuración: {config_path}")
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Configuración JSON inválida en {config_path}: {exc}") from exc
+    if not isinstance(config, dict):
+        raise ValueError(f"La configuración debe ser un objeto JSON en {config_path}")
+    missing = [key for key in required_keys if key not in config]
+    if missing:
+        raise ValueError(
+            f"Falta configuración requerida '{missing[0]}' en {config_path}"
+        )
+    context["vGblDicConfig"] = config
+    return config
+
+
 def build_context():
     root = __import__("pathlib").Path(__file__).parents[1]
     logging.basicConfig(filename=root / "Logs" / "execution.log", level=logging.INFO)
     return {"root": root, "inputs": root / "Inputs", "outputs": root / "Outputs"}
 '''
+    return template.replace("__REQUIRED_CONFIG_KEYS__", required_keys_literal)
 
 
 def _adapter_source(path: str) -> str:
@@ -863,6 +915,7 @@ def _executable_main(plan: dict[str, Any]) -> str:
         "    run_bot,",
         "    resolve,",
         "    evaluate,",
+        "    load_config,",
         "    report_unsupported,",
         "    execute_rocketbot_file,",
         "    execute_rocketbot_script,",
@@ -932,7 +985,7 @@ def test_project_layout():
         assert (root / name).is_dir()
 ''')
             elif path.name == "HU00_Config.py":
-                _write_text(path, _executable_config() if plan.get("mode") == "executable" else '''from pathlib import Path
+                _write_text(path, _executable_config(plan.get("config_keys", [])) if plan.get("mode") == "executable" else '''from pathlib import Path
 
 
 def build_context():
@@ -953,7 +1006,7 @@ def build_context():
                 else:
                     _write_text(path, _module_stub(entry))
         elif path.name == "config.json":
-            _write_text(path, json.dumps({
+            config = {
                 "inputs": "Inputs",
                 "outputs": "Outputs",
                 "logs": "Logs",
@@ -961,7 +1014,18 @@ def build_context():
                     _latest_bots(export_rocketbot_db(plan["source_db"], include_raw_data=False)),
                     str((plan.get("main_bot") or {}).get("name", "")),
                 )],
-            }, indent=2))
+            }
+            for key in plan.get("config_keys", []):
+                config[key] = (
+                    "[PRUEBA] NOMBRE_ROBOT"
+                    if key == "AsuntoInicio"
+                    else "Inicio del robot NOMBRE_ROBOT"
+                    if key == "CuerpoInicio"
+                    else "False"
+                    if key.casefold().startswith("booleano")
+                    else ""
+                )
+            _write_text(path, json.dumps(config, indent=2, ensure_ascii=False))
         elif path.name == "CONVERSION_PLAN.md":
             _write_text(path, "# Plan de conversión Rocketbot → Python\n\n" + json.dumps(plan, ensure_ascii=False, indent=2))
         elif path.name == "ROCKETBOT_MAPPING.json":

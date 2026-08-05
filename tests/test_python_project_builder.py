@@ -5,6 +5,7 @@ import sqlite3
 import runpy
 import sys
 import logging
+import json
 from pathlib import Path
 
 from core.db_builder import create_rocketbot_db
@@ -12,6 +13,15 @@ from core.python_project_builder import (
     generate_rocketbot_python_project,
     plan_rocketbot_python_project,
 )
+
+
+def _reset_generated_runtime():
+    logging.shutdown()
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+    for name in list(sys.modules):
+        if name == "HU" or name.startswith("HU.") or name == "adapters" or name.startswith("adapters."):
+            sys.modules.pop(name, None)
 
 
 class PythonProjectBuilderTest(unittest.TestCase):
@@ -191,10 +201,108 @@ class PythonProjectBuilderTest(unittest.TestCase):
                 context = namespace["main"]()
             finally:
                 sys.path.remove(str(root / "out"))
-            logging.shutdown()
+                _reset_generated_runtime()
             self.assertEqual(context["vLocStrX"], "from_script")
             self.assertEqual(context["unsupported_commands"][0]["command"], "module:unknown")
             self.assertEqual(result["validation"]["not_implemented_errors"], [])
+
+    def test_executable_cargar_config_padre_loads_config_before_script(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            db_path = root / "source.db"
+            create_rocketbot_db(
+                str(db_path),
+                {
+                    "bots": [{
+                        "name": "main",
+                        "project": {
+                            "project": {
+                                "commands": [{"type": "module", "name": "HU01"}],
+                                "modules": [{
+                                    "name": "HU01",
+                                    "commands": [
+                                        {
+                                            "type": "module",
+                                            "module_name": "CargarConfigPadre",
+                                            "module": "2NV",
+                                        },
+                                        {
+                                            "type": "exec_script_python",
+                                            "script": (
+                                                "Config=eval(GetVar('vGblDicConfig'))\n"
+                                                "SetVar('vGblStrAsuntoCorreo', Config['AsuntoInicio'])\n"
+                                                "SetVar('vGblStrCuerpoCorreo', Config['CuerpoInicio'])\n"
+                                            ),
+                                        },
+                                        {
+                                            "type": "module",
+                                            "module_name": "Custom",
+                                            "module": "unknown",
+                                        },
+                                    ],
+                                }],
+                            }
+                        },
+                    }]
+                },
+            )
+
+            output = root / "out"
+            plan = plan_rocketbot_python_project(
+                str(db_path), str(output), mode="executable", strict=False
+            )
+            self.assertNotIn("module:cargarconfigpadre", plan["translation"]["unsupported"])
+            self.assertIn("AsuntoInicio", plan["config_keys"])
+            self.assertIn("CuerpoInicio", plan["config_keys"])
+            result = generate_rocketbot_python_project(
+                str(db_path), str(output), plan["plan_id"],
+                approve=True, mode="executable", strict=False,
+            )
+
+            config = json.loads((output / "config" / "config.json").read_text(encoding="utf-8"))
+            self.assertTrue(config["AsuntoInicio"])
+            self.assertTrue(config["CuerpoInicio"])
+            generated_source = "\n".join(
+                path.read_text(encoding="utf-8")
+                for path in output.rglob("*.py")
+            )
+            self.assertNotIn("NotImplementedError", generated_source)
+            self.assertEqual(result["validation"]["compile_errors"], [])
+
+            sys.path.insert(0, str(output))
+            try:
+                namespace = runpy.run_path(str(output / "main.py"))
+                context = namespace["main"]()
+            finally:
+                sys.path.remove(str(output))
+                _reset_generated_runtime()
+            self.assertIsInstance(context["vGblDicConfig"], dict)
+            self.assertTrue(context["vGblDicConfig"])
+            self.assertEqual(context["vGblStrAsuntoCorreo"], config["AsuntoInicio"])
+            self.assertEqual(context["vGblStrCuerpoCorreo"], config["CuerpoInicio"])
+            self.assertEqual(context["unsupported_commands"][0]["command"], "module:unknown")
+
+            config_path = output / "config" / "config.json"
+            config_namespace = runpy.run_path(str(output / "HU" / "HU00_Config.py"))
+            config_without_required_key = dict(config)
+            config_without_required_key.pop("AsuntoInicio")
+            config_path.write_text(
+                json.dumps(config_without_required_key),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                ValueError,
+                r"Falta configuración requerida 'AsuntoInicio' en .*config[\\/]config\.json",
+            ):
+                config_namespace["load_config"](config_namespace["build_context"]())
+
+            config_path.unlink()
+            with self.assertRaisesRegex(
+                FileNotFoundError,
+                r"Falta el archivo de configuración: .*config[\\/]config\.json",
+            ):
+                config_namespace["load_config"](config_namespace["build_context"]())
+            _reset_generated_runtime()
 
 
 if __name__ == "__main__":

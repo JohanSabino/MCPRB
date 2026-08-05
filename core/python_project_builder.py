@@ -120,7 +120,7 @@ def _is_translatable(node: dict[str, Any], key: str | None = None) -> bool:
         "module:http", "module:files", "module:requests", "module:sqlite",
         "module:database", "module:logs", "module:logging",
         "module:cargarconfigpadre", "module:limpiarvariablesrobot",
-        "module:validarrutas",
+        "module:validarrutas", "module:cerraraplicaciones",
     }
     if not supported:
         return False
@@ -599,6 +599,10 @@ def _module_lines(node: dict[str, Any], strict: bool) -> list[str]:
         return [f"clear_variables(context, {names!r})"]
     if normalized == "validarrutas" or normalized_name == "validarrutas":
         return [f"validate_paths(context, {payload!r})"]
+    if normalized == "cerraraplicaciones" or normalized_name == "cerraraplicaciones":
+        applications = str(_payload_value(payload, "input_ListAplicaciones", "applications", default=""))
+        names = [name.strip() for name in applications.split(",") if name.strip()]
+        return [f"close_applications(context, {names!r})"]
     if normalized == "readfile":
         result = str(_payload_value(payload, "var_", "result_var"))
         path = _payload_value(payload, "file_", "path")
@@ -725,7 +729,7 @@ def _executable_source(name: str, commands: list[dict[str, Any]], strict: bool) 
         "from pathlib import Path",
         "from HU.HU00_Config import (",
         "    evaluate, execute_rocketbot_file, execute_rocketbot_script,",
-        "    clear_variables, load_config, report_unsupported, resolve, run_bot,",
+        "    clear_variables, close_applications, load_config, report_unsupported, resolve, run_bot,",
         "    validate_paths,",
         ")",
         "from adapters import files, http, sqlite",
@@ -841,6 +845,15 @@ def validate_paths(context, payload):
     return True
 
 
+def close_applications(context, applications):
+    context.setdefault("simulated_actions", []).append({
+        "action": "close_applications",
+        "applications": list(applications),
+        "simulated": True,
+    })
+    logging.getLogger(__name__).info("Cierre de aplicaciones simulado: %s", applications)
+
+
 def execute_rocketbot_script(source, context, filename="<rocketbot>"):
     namespace = {
         "context": context,
@@ -944,6 +957,7 @@ def _executable_main(plan: dict[str, Any]) -> str:
         "    clear_variables,",
         "    load_config,",
         "    report_unsupported,",
+        "    close_applications,",
         "    validate_paths,",
         "    execute_rocketbot_file,",
         "    execute_rocketbot_script,",

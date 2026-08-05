@@ -236,6 +236,12 @@ class PythonProjectBuilderTest(unittest.TestCase):
                                             "check_Trazabilidad": True,
                                             "check_Formatos": True,
                                         },
+                                        {
+                                            "type": "module",
+                                            "module_name": "2NV",
+                                            "module": "CerrarAplicaciones",
+                                            "input_ListAplicaciones": "EXCEL.EXE,notepad.exe",
+                                        },
                                     ],
                                 }],
                             }
@@ -266,6 +272,14 @@ class PythonProjectBuilderTest(unittest.TestCase):
             self.assertTrue((output / "Inputs").is_dir())
             self.assertTrue((output / "Logs").is_dir())
             self.assertTrue((output / "Plantillas").is_dir())
+            self.assertEqual(
+                context["simulated_actions"][0],
+                {
+                    "action": "close_applications",
+                    "applications": ["EXCEL.EXE", "notepad.exe"],
+                    "simulated": True,
+                },
+            )
             self.assertEqual(result["validation"]["compile_errors"], [])
 
     def test_executable_cargar_config_padre_loads_config_before_script(self):

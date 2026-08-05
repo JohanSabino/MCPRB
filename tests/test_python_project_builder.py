@@ -228,6 +228,14 @@ class PythonProjectBuilderTest(unittest.TestCase):
                                             "module": "LimpiarVariablesRobot",
                                             "input_ListVariables": "vFoo,vBar",
                                         },
+                                        {
+                                            "type": "module",
+                                            "module_name": "2NV",
+                                            "module": "ValidarRutas",
+                                            "check_ArchivosRecibidos": True,
+                                            "check_Trazabilidad": True,
+                                            "check_Formatos": True,
+                                        },
                                     ],
                                 }],
                             }
@@ -255,6 +263,9 @@ class PythonProjectBuilderTest(unittest.TestCase):
                 _reset_generated_runtime()
             self.assertEqual(context["vFoo"], "")
             self.assertEqual(context["vBar"], "")
+            self.assertTrue((output / "Inputs").is_dir())
+            self.assertTrue((output / "Logs").is_dir())
+            self.assertTrue((output / "Plantillas").is_dir())
             self.assertEqual(result["validation"]["compile_errors"], [])
 
     def test_executable_cargar_config_padre_loads_config_before_script(self):

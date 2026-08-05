@@ -120,6 +120,7 @@ def _is_translatable(node: dict[str, Any], key: str | None = None) -> bool:
         "module:http", "module:files", "module:requests", "module:sqlite",
         "module:database", "module:logs", "module:logging",
         "module:cargarconfigpadre", "module:limpiarvariablesrobot",
+        "module:validarrutas",
     }
     if not supported:
         return False
@@ -596,6 +597,8 @@ def _module_lines(node: dict[str, Any], strict: bool) -> list[str]:
         variables = str(_payload_value(payload, "input_ListVariables", "variables", default=""))
         names = [name.strip() for name in variables.split(",") if name.strip()]
         return [f"clear_variables(context, {names!r})"]
+    if normalized == "validarrutas" or normalized_name == "validarrutas":
+        return [f"validate_paths(context, {payload!r})"]
     if normalized == "readfile":
         result = str(_payload_value(payload, "var_", "result_var"))
         path = _payload_value(payload, "file_", "path")
@@ -723,6 +726,7 @@ def _executable_source(name: str, commands: list[dict[str, Any]], strict: bool) 
         "from HU.HU00_Config import (",
         "    evaluate, execute_rocketbot_file, execute_rocketbot_script,",
         "    clear_variables, load_config, report_unsupported, resolve, run_bot,",
+        "    validate_paths,",
         ")",
         "from adapters import files, http, sqlite",
         "",
@@ -822,6 +826,19 @@ def SetVar(name, value, context):
 def clear_variables(context, names):
     for name in names:
         context[name] = ""
+
+
+def validate_paths(context, payload):
+    root = Path(context["root"])
+    paths = {
+        "check_ArchivosRecibidos": root / "Inputs",
+        "check_Trazabilidad": root / "Logs",
+        "check_Formatos": root / "Plantillas",
+    }
+    for option, path in paths.items():
+        if payload.get(option):
+            path.mkdir(parents=True, exist_ok=True)
+    return True
 
 
 def execute_rocketbot_script(source, context, filename="<rocketbot>"):
@@ -927,6 +944,7 @@ def _executable_main(plan: dict[str, Any]) -> str:
         "    clear_variables,",
         "    load_config,",
         "    report_unsupported,",
+        "    validate_paths,",
         "    execute_rocketbot_file,",
         "    execute_rocketbot_script,",
         ")",

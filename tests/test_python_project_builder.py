@@ -206,6 +206,57 @@ class PythonProjectBuilderTest(unittest.TestCase):
             self.assertEqual(context["unsupported_commands"][0]["command"], "module:unknown")
             self.assertEqual(result["validation"]["not_implemented_errors"], [])
 
+    def test_executable_translates_limpiar_variables_robot(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            db_path = root / "source.db"
+            create_rocketbot_db(
+                str(db_path),
+                {
+                    "bots": [{
+                        "name": "main",
+                        "project": {
+                            "project": {
+                                "commands": [{"type": "module", "name": "HU01"}],
+                                "modules": [{
+                                    "name": "HU01",
+                                    "commands": [
+                                        {"type": "set_variable", "variable": "vFoo", "value": "value"},
+                                        {
+                                            "type": "module",
+                                            "module_name": "2NV",
+                                            "module": "LimpiarVariablesRobot",
+                                            "input_ListVariables": "vFoo,vBar",
+                                        },
+                                    ],
+                                }],
+                            }
+                        },
+                    }]
+                },
+            )
+
+            output = root / "out"
+            plan = plan_rocketbot_python_project(
+                str(db_path), str(output), mode="executable", strict=True
+            )
+            self.assertEqual(plan["translation"]["unsupported"], [])
+            result = generate_rocketbot_python_project(
+                str(db_path), str(output), plan["plan_id"],
+                approve=True, mode="executable", strict=True,
+            )
+
+            sys.path.insert(0, str(output))
+            try:
+                namespace = runpy.run_path(str(output / "main.py"))
+                context = namespace["main"]()
+            finally:
+                sys.path.remove(str(output))
+                _reset_generated_runtime()
+            self.assertEqual(context["vFoo"], "")
+            self.assertEqual(context["vBar"], "")
+            self.assertEqual(result["validation"]["compile_errors"], [])
+
     def test_executable_cargar_config_padre_loads_config_before_script(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

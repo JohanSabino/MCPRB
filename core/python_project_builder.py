@@ -633,9 +633,16 @@ def _module_lines(node: dict[str, Any], strict: bool) -> list[str]:
             f"context[{result!r}] = sqlite.query(resolve({str(database)!r}, context), "
             f"resolve({str(sql)!r}, context))"
         ]
-    if normalized_name in {"logs", "logging"} or normalized in {"log", "logging"}:
-        message = _payload_value(payload, "message", "text", default=node.get("command", ""))
-        return [f"logging.getLogger(__name__).info(resolve({str(message)!r}, context))"]
+    if normalized in {"log", "logs", "logging"} or normalized_name in {"log", "logs", "logging"}:
+        log_payload = {
+            key: payload.get(key, "")
+            for key in ("option_", "input_2", "input_3", "input_4")
+        }
+        if not any(log_payload.values()):
+            log_payload["input_2"] = _payload_value(
+                payload, "message", "text", default=node.get("command", "")
+            )
+        return [f"write_rocketbot_log(context, {log_payload!r})"]
     if "sap" in normalized or "sap" in normalized_name:
         return _unsupported_line(node, strict)
     return _unsupported_line(node, strict)
@@ -734,7 +741,7 @@ def _executable_source(name: str, commands: list[dict[str, Any]], strict: bool) 
         "    evaluate, execute_rocketbot_file, execute_rocketbot_script,",
         "    clear_variables, close_applications, load_config, load_variables_from_xlsx,",
         "    report_unsupported, resolve, run_bot,",
-        "    validate_paths,",
+        "    validate_paths, write_rocketbot_log,",
         ")",
         "from adapters import files, http, sqlite",
         "",
@@ -778,6 +785,7 @@ import logging
 import re
 import zipfile
 import xml.etree.ElementTree as ET
+from datetime import datetime
 from pathlib import Path
 
 _PLACEHOLDER = re.compile(r"\\{([^{}]+)\\}")
@@ -858,6 +866,29 @@ def close_applications(context, applications):
         "simulated": True,
     })
     logging.getLogger(__name__).info("Cierre de aplicaciones simulado: %s", applications)
+
+
+def write_rocketbot_log(context, payload):
+    option = str(payload.get("option_") or "Informativo")
+    message = str(resolve(payload.get("input_2", ""), context))
+    title = str(resolve(payload.get("input_3", ""), context))
+    bot = str(resolve(payload.get("input_4", ""), context))
+    record = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "option": option,
+        "message": message,
+        "title": title,
+        "bot": bot,
+    }
+    context.setdefault("rocketbot_logs", []).append(record)
+    log_path = Path(context["root"]) / "Logs" / "rocketbot.log.jsonl"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(record, ensure_ascii=False) + "\\n")
+    level = logging.ERROR if option.casefold() == "error" else logging.INFO
+    logging.getLogger("rocketbot").log(
+        level, "[%s] %s | %s | %s", option, title, bot, message
+    )
 
 
 def _xlsx_local_name(tag):
@@ -1035,6 +1066,7 @@ def _executable_main(plan: dict[str, Any]) -> str:
         "    report_unsupported,",
         "    close_applications,",
         "    validate_paths,",
+        "    write_rocketbot_log,",
         "    execute_rocketbot_file,",
         "    execute_rocketbot_script,",
         ")",

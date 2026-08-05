@@ -624,6 +624,9 @@ separadas por comas. `ValidarRutas` prepara las carpetas estándar `Inputs`,
 `Logs` y `Plantillas`; sus rutas iniciales pueden cambiarse en el XLSX generado.
 `CerrarAplicaciones` se registra como acción simulada por defecto para no cerrar
 procesos del equipo durante pruebas.
+`Logs` conserva los registros funcionales en `Logs/rocketbot.log.jsonl` con tipo,
+mensaje, título y bot, y también los refleja en `Logs/execution.log`; los
+placeholders `{vVariable}` se resuelven desde el contexto del proyecto.
 
 La lectura intenta decodificar cada payload como Base64/JSON aunque
 `data_type` esté vacío. `normalize_db: true` sigue disponible solo como

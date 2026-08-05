@@ -225,6 +225,15 @@ class PythonProjectBuilderTest(unittest.TestCase):
                                         {
                                             "type": "module",
                                             "module_name": "2NV",
+                                            "module": "Logs",
+                                            "option_": "Informativo",
+                                            "input_2": "Procesando {vFoo}",
+                                            "input_3": "Prueba",
+                                            "input_4": "HU01",
+                                        },
+                                        {
+                                            "type": "module",
+                                            "module_name": "2NV",
                                             "module": "LimpiarVariablesRobot",
                                             "input_ListVariables": "vFoo,vBar",
                                         },
@@ -269,6 +278,10 @@ class PythonProjectBuilderTest(unittest.TestCase):
                 _reset_generated_runtime()
             self.assertEqual(context["vFoo"], "")
             self.assertEqual(context["vBar"], "")
+            self.assertEqual(context["rocketbot_logs"][0]["message"], "Procesando value")
+            functional_log = output / "Logs" / "rocketbot.log.jsonl"
+            self.assertTrue(functional_log.is_file())
+            self.assertEqual(json.loads(functional_log.read_text().splitlines()[0])["title"], "Prueba")
             self.assertTrue((output / "Inputs").is_dir())
             self.assertTrue((output / "Logs").is_dir())
             self.assertTrue((output / "Plantillas").is_dir())

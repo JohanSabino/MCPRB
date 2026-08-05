@@ -303,6 +303,10 @@ class PythonProjectBuilderTest(unittest.TestCase):
                                             "module": "2NV",
                                         },
                                         {
+                                            "type": "exec_python",
+                                            "path": "{vGblStrRutaPython}CargarVariables.py",
+                                        },
+                                        {
                                             "type": "exec_script_python",
                                             "script": (
                                                 "Config=eval(GetVar('vGblDicConfig'))\n"
@@ -354,6 +358,8 @@ class PythonProjectBuilderTest(unittest.TestCase):
                 _reset_generated_runtime()
             self.assertIsInstance(context["vGblDicConfig"], dict)
             self.assertTrue(context["vGblDicConfig"])
+            self.assertGreater(context["rocketbot_variables_loaded"], 0)
+            self.assertEqual(context["RUTA_INPUTS"], "Inputs")
             self.assertEqual(context["vGblStrAsuntoCorreo"], config["AsuntoInicio"])
             self.assertEqual(context["vGblStrCuerpoCorreo"], config["CuerpoInicio"])
             self.assertEqual(context["unsupported_commands"][0]["command"], "module:unknown")

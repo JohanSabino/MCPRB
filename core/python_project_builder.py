@@ -6,6 +6,7 @@ import json
 import re
 import zipfile
 import ast
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -690,6 +691,8 @@ def _command_lines(node: dict[str, Any], strict: bool) -> list[str]:
         script = str(_payload_value(payload, "path", "file", "script", default=script))
         if SENSITIVE_RE.search(script):
             return _unsupported_line(node, strict)
+        if father == "execpython" and script.replace("\\", "/").casefold().endswith("cargarvariables.py"):
+            return ["load_variables_from_xlsx(context)"]
         if father == "execpython" and (
             script.casefold().endswith(".py")
             or "/" in script
@@ -729,7 +732,8 @@ def _executable_source(name: str, commands: list[dict[str, Any]], strict: bool) 
         "from pathlib import Path",
         "from HU.HU00_Config import (",
         "    evaluate, execute_rocketbot_file, execute_rocketbot_script,",
-        "    clear_variables, close_applications, load_config, report_unsupported, resolve, run_bot,",
+        "    clear_variables, close_applications, load_config, load_variables_from_xlsx,",
+        "    report_unsupported, resolve, run_bot,",
         "    validate_paths,",
         ")",
         "from adapters import files, http, sqlite",
@@ -772,6 +776,8 @@ def _executable_config(required_keys: list[str]) -> str:
 import json
 import logging
 import re
+import zipfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 _PLACEHOLDER = re.compile(r"\\{([^{}]+)\\}")
@@ -852,6 +858,75 @@ def close_applications(context, applications):
         "simulated": True,
     })
     logging.getLogger(__name__).info("Cierre de aplicaciones simulado: %s", applications)
+
+
+def _xlsx_local_name(tag):
+    return tag.rsplit("}", 1)[-1]
+
+
+def _read_xlsx_rows(path):
+    with zipfile.ZipFile(path) as workbook:
+        shared = []
+        if "xl/sharedStrings.xml" in workbook.namelist():
+            root = ET.fromstring(workbook.read("xl/sharedStrings.xml"))
+            for item in root:
+                shared.append("".join(node.text or "" for node in item.iter() if _xlsx_local_name(node.tag) == "t"))
+        sheet_name = next(
+            name for name in workbook.namelist()
+            if name.startswith("xl/worksheets/") and name.endswith(".xml")
+        )
+        root = ET.fromstring(workbook.read(sheet_name))
+        rows = []
+        for row in root.iter():
+            if _xlsx_local_name(row.tag) != "row":
+                continue
+            values = {}
+            for cell in row:
+                if _xlsx_local_name(cell.tag) != "c":
+                    continue
+                reference = cell.attrib.get("r", "A1")
+                column = 0
+                for char in reference:
+                    if not char.isalpha():
+                        break
+                    column = column * 26 + ord(char.upper()) - 64
+                value_node = next((node for node in cell if _xlsx_local_name(node.tag) == "v"), None)
+                inline_node = next((node for node in cell if _xlsx_local_name(node.tag) == "is"), None)
+                if inline_node is not None:
+                    value = "".join(node.text or "" for node in inline_node.iter() if _xlsx_local_name(node.tag) == "t")
+                elif value_node is None:
+                    value = ""
+                elif cell.attrib.get("t") == "s":
+                    value = shared[int(value_node.text or "0")]
+                else:
+                    value = value_node.text or ""
+                values[column] = value
+            rows.append([values.get(index, "") for index in range(1, max(values, default=0) + 1)])
+        return rows
+
+
+def load_variables_from_xlsx(context):
+    config_path = Path(context["root"]) / "config" / "config.xlsx"
+    if not config_path.is_file():
+        raise FileNotFoundError(f"Falta el archivo de variables: {config_path}")
+    rows = _read_xlsx_rows(config_path)
+    if not rows:
+        raise ValueError(f"El archivo de variables está vacío: {config_path}")
+    headers = {str(value).strip().casefold(): index for index, value in enumerate(rows[0])}
+    if "clave" not in headers or "valor" not in headers:
+        raise ValueError(f"El archivo de variables requiere columnas Clave y Valor: {config_path}")
+    loaded = 0
+    for row in rows[1:]:
+        name = str(row[headers["clave"]] if headers["clave"] < len(row) else "").strip()
+        if not name:
+            continue
+        value = str(row[headers["valor"]] if headers["valor"] < len(row) else "")
+        if not value.strip():
+            continue
+        context[name] = value
+        loaded += 1
+    context["rocketbot_variables_loaded"] = loaded
+    return loaded
 
 
 def execute_rocketbot_script(source, context, filename="<rocketbot>"):
@@ -956,6 +1031,7 @@ def _executable_main(plan: dict[str, Any]) -> str:
         "    evaluate,",
         "    clear_variables,",
         "    load_config,",
+        "    load_variables_from_xlsx,",
         "    report_unsupported,",
         "    close_applications,",
         "    validate_paths,",

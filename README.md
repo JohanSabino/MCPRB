@@ -613,8 +613,17 @@ contiene `NotImplementedError`.
 En `strict: true`, el plan devuelve `blocked_unsupported` junto con
 `translation.unsupported_details`, incluyendo comando, bot y línea. Los
 scripts `execPython` se resuelven como archivos cuando contienen una ruta;
-`execScriptPython` y scripts inline usan el puente `GetVar`/`SetVar` del
-proyecto generado. Una ruta inexistente se reporta en `unsupported_commands`.
+`CargarVariables.py` se integra como lector de `config/config.xlsx`, usando las
+columnas `Clave` y `Valor` e ignorando celdas vacías para no sobrescribir valores
+calculados. `execScriptPython` y scripts inline usan el puente `GetVar`/`SetVar`
+del proyecto generado. Una ruta externa inexistente se reporta en
+`unsupported_commands`.
+
+`LimpiarVariablesRobot` vacía las variables indicadas en `input_ListVariables`,
+separadas por comas. `ValidarRutas` prepara las carpetas estándar `Inputs`,
+`Logs` y `Plantillas`; sus rutas iniciales pueden cambiarse en el XLSX generado.
+`CerrarAplicaciones` se registra como acción simulada por defecto para no cerrar
+procesos del equipo durante pruebas.
 
 La lectura intenta decodificar cada payload como Base64/JSON aunque
 `data_type` esté vacío. `normalize_db: true` sigue disponible solo como
